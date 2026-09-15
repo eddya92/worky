@@ -1,94 +1,85 @@
-# worky — Team di agenti per sviluppo Symfony
+# worky — Enforcement e conoscenza di progetto per lo sviluppo agentico
 
-**Data:** 2026-09-15
-**Stato:** design approvato, da implementare
+**Data:** 2026-09-15 (revisione 2)
+**Stato:** design approvato, in implementazione
 
 ## Obiettivo
 
-Un team di agenti specializzati, distribuito come plugin Claude Code, che prende
-una richiesta di feature e la porta fino a una pull request con test verdi. Il
-prodotto è il team, non l'applicazione su cui lavora.
+worky è un plugin Claude Code che rende affidabile lo sviluppo assistito su
+progetti reali, aggiungendo i due pezzi che oggi mancano:
 
-Il team è **agnostico rispetto allo stack**. Ruoli, pipeline, gate e hook non
-contengono nulla di specifico di un framework: la conoscenza dello stack vive
-in **pacchetti sostituibili** (`skills/stacks/<nome>/`) selezionati
-automaticamente per progetto. La v1 ne implementa uno solo, Symfony con Twig e
-Stimulus, perché è l'unico validabile su progetti reali fin da subito.
+1. **Regole che il runtime fa rispettare.** Hook che eseguono i comandi di
+   qualità del progetto e bloccano ciò che non passa. Un agente non può
+   dichiarare che i test passano se non passano.
+2. **Memoria delle convenzioni.** Un file per progetto (`.worky.json`) con i
+   comandi veri di quel repo, più pacchetti di convenzioni per stack che
+   codificano le regole di casa.
 
-Il team è installato una volta e disponibile su tutti i progetti. Ogni progetto
-dichiara i propri comandi concreti in un file di adattamento; gli agenti
-restano generici.
+A questi si aggiunge un **onboarding a intervista** che raccoglie entrambe le
+cose su un progetto nuovo.
+
+## Cosa worky NON fa, e perché
+
+worky **non** contiene agenti, né una pipeline, né gate di processo.
+
+Il processo di sviluppo — brainstorming, spec, piani, TDD, debugging
+sistematico, code review, esecuzione via subagent con registro — esiste già in
+`superpowers` ed è mantenuto da altri. Ricostruirlo significherebbe mantenere
+due copie divergenti dello stesso workflow, e la seconda copia sarebbe la
+peggiore.
+
+Gli esperti di dominio esistono già anch'essi: cataloghi come
+`wshobson/agents` ne pubblicano centinaia, installabili con un comando e
+compatibili con worky.
+
+Ciò che nessuno dei due fa, verificato per ispezione: eseguire *i comandi del
+tuo progetto* e impedire che si prosegua col rosso, e ricordare come si fanno
+le cose *in quel repo*. È lì che worky si ferma, ed è tutto ciò che fa.
 
 ## Vincoli
 
-- **Runtime:** Claude Code. Nessun servizio, nessuna infrastruttura da mantenere.
+- **Runtime:** Claude Code. Nessun servizio, nessuna infrastruttura.
 - **Stack dei progetti serviti:** architettura multi-stack; pacchetto
   implementato nella v1: PHP 8 / Symfony / Twig / Stimulus / JS vanilla.
-- **Gate umani:** due. Approvazione della spec, approvazione della PR.
-- **Consegna:** branch pushato + pull request GitHub via `gh`.
-- **Riuso:** il processo di sviluppo (brainstorming, piani, TDD, debugging,
-  code review) viene da `superpowers` e non va riscritto. worky aggiunge i
-  ruoli, l'adattamento per progetto, i gate di qualità e il collante.
+- **Nessuna dipendenza runtime.** Gli script eseguiti come hook usano
+  `require_once` espliciti, mai l'autoloader di Composer: un plugin installato
+  non ha `vendor/`.
+- **Riuso:** il processo viene da `superpowers` e viene richiamato per nome,
+  non riscritto.
 
 ## Architettura
 
 ### Distribuzione
 
-`worky` è un repo git con un manifest `.claude-plugin/plugin.json`. Si registra
+`worky` è un repo git con manifest `.claude-plugin/plugin.json`. Si registra
 come marketplace (`claude plugin marketplace add <repo>`) e si installa una
-volta; da quel momento agenti, skill, comandi e hook sono attivi in ogni
-progetto. Gli aggiornamenti passano da `claude plugin marketplace update`.
+volta; da quel momento hook, skill e comandi sono attivi in ogni progetto.
+Gli aggiornamenti passano da `claude plugin marketplace update`.
 
-Le alternative scartate: `~/.claude/` (nessun versioning, non condivisibile,
-legato alla macchina) e la copia in ogni progetto (N copie che divergono).
+Le alternative scartate: `~/.claude/` (nessun versioning, legato alla
+macchina) e la copia in ogni progetto (N copie che divergono).
 
 ### Struttura del pacchetto
 
 ```
 worky/
 ├── .claude-plugin/plugin.json
-├── agents/
-│   ├── worky-analyst.md
-│   ├── worky-backend.md
-│   ├── worky-frontend.md
-│   ├── worky-qa.md
-│   └── worky-reviewer.md
-├── skills/
-│   ├── worky-workflow/              # pipeline e gate, agnostico
-│   └── stacks/
-│       └── symfony-twig-stimulus/   # unico pacchetto della v1
-├── commands/
-│   ├── feature.md
-│   ├── onboard.md
-│   └── ship.md
+├── src/                             # Config: lettura e scrittura di .worky.json
 ├── hooks/
 │   ├── hooks.json
-│   └── scripts/
-├── templates/worky.schema.json
-└── evals/
+│   ├── php-lint.php                 # PostToolUse su Write|Edit
+│   └── pre-pr-gate.php              # PreToolUse su Bash
+├── commands/onboard.md              # l'intervista
+├── skills/stacks/
+│   └── symfony-twig-stimulus/       # unico pacchetto della v1
+└── tests/
 ```
-
-### Il team
-
-Cinque ruoli, mandati non sovrapposti. Il tech lead non è un agente: è la
-sessione principale.
-
-| Ruolo | Mandato | Input | Output |
-|---|---|---|---|
-| `analyst` | Trasforma una richiesta vaga in spec approvabile. Legge il codice, non lo scrive. | Richiesta o issue | File di spec |
-| `backend` | Entity e Doctrine, repository, controller, servizi, form. TDD stretto. | Task del piano | Diff + output PHPUnit |
-| `frontend` | Twig, controller Stimulus, JS vanilla, CSS. Test funzionali `WebTestCase`. | Task del piano | Diff + output test |
-| `qa` | Verifica indipendente: suite completa, feature contro la **spec**, casi limite scoperti. Non scrive i test di produzione. | Spec + branch | Rapporto di verifica |
-| `reviewer` | Review avversariale del diff: correttezza, PHPStan, CS, duplicazione di codice già presente. | Diff | Elenco di rilievi |
-
-`qa` non scrive i test di produzione: li scrive chi implementa, altrimenti il
-TDD non è TDD. Il suo valore è l'indipendenza dal piano.
 
 ### Pacchetti di stack
 
-Un pacchetto è una skill in `skills/stacks/<nome>/` che risponde a tre
-domande per il suo stack: quali convenzioni di struttura seguire, come si
-scrive un test, quali errori tipici evitare.
+Un pacchetto è una skill in `skills/stacks/<nome>/` che risponde a tre domande
+per il suo stack: quali convenzioni di struttura seguire, come si scrive un
+test, quali errori tipici evitare.
 
 Il contenuto **non** ripete le best practice generiche del framework: quelle il
 modello le conosce. Un pacchetto codifica le regole di casa e le decisioni non
@@ -97,80 +88,75 @@ DTO o form, cosa può parlare con Doctrine, livello di PHPStan preteso,
 convenzioni di naming dei controller Stimulus).
 
 Aggiungere un pacchetto (`laravel-blade`, `react`) deve richiedere solo una
-cartella nuova e una regola di rilevamento: nessuna modifica agli agenti, alla
-pipeline o agli hook. Questo è un criterio di successo verificabile.
+cartella nuova: nessuna modifica agli hook o al resto del plugin.
 
 ### Adattamento per progetto
 
-`/worky:onboard` ispeziona `composer.json`, `phpunit.xml.dist`, `Makefile`,
-`package.json`, `phpstan.neon` e la struttura delle cartelle, poi scrive
-`.worky.json` nel progetto:
+`.worky.json` nella radice del progetto servito dichiara:
 
-- lo **stack rilevato** e quindi il pacchetto da caricare
-- comando dei test (e separazione unit / functional, se esiste)
-- comando di lint e di analisi statica, con il livello configurato
-- versioni del framework e del linguaggio
-- come si prepara il database di test (fixture, migrazioni)
-- percorsi convenzionali: entity, controller, template, assets Stimulus
-- comando per avviare l'applicazione in locale
+- lo **stack**, e quindi il pacchetto di convenzioni da caricare
+- il **comando dei test** (e la testsuite funzionale, se separata)
+- il comando di **analisi statica** e quello di **stile**
+- come si **prepara il database** di test
+- come si **avvia** l'applicazione in locale
+- i **percorsi convenzionali**: entity, controller, template, assets
 
-Il comando **mostra all'utente ciò che ha dedotto e chiede conferma** prima di
-scrivere. Un comando di test dedotto male in silenzio avvelena ogni task
-successivo.
+Se il file manca, il gate si ferma con un messaggio che indica l'onboarding.
+Gli agenti non indovinano mai i comandi di un progetto.
 
-Se `.worky.json` manca, ogni comando worky si ferma e propone l'onboarding:
-gli agenti non indovinano mai i comandi di un progetto.
+## Onboarding
 
-## Flusso di lavoro
+`/worky:onboard` è un'**intervista**, non un rilevamento silenzioso.
 
-1. `/worky:feature "<descrizione>"` (o riferimento a issue).
-2. `analyst` esplora e produce la spec in `docs/specs/`. → **Gate 1: utente.**
-3. Dalla spec nasce un piano a task con dipendenze esplicite (`writing-plans`).
-4. Si apre un git worktree isolato per la feature.
-5. Fan-out: i task indipendenti vanno in parallelo a `backend` e `frontend`,
-   quelli dipendenti in sequenza. Ogni task in TDD: rosso, verde, refactor.
-6. `qa` esegue la suite completa e verifica la feature contro la spec.
-7. `reviewer` produce i rilievi; tornano agli sviluppatori. Dopo due giri senza
-   convergenza il flusso si ferma e chiama l'utente.
-8. Push del branch e apertura della PR con descrizione derivata dalla spec.
-   → **Gate 2: utente.**
+La ripartizione fra macchina e domande segue un criterio solo: ciò che un file
+dichiara senza ambiguità viene letto; tutto il resto viene chiesto.
 
-`/worky:ship` esegue i passi 6-8 su un branch già pronto.
+- **Letto dai file:** stack e framework, versioni di PHP e del framework,
+  presenza di PHPUnit, PHPStan, CS-Fixer, percorsi convenzionali esistenti.
+- **Chiesto all'utente:** i comandi che vanno eseguiti davvero (spesso dentro
+  un wrapper Docker o un target `make` non standard), come si preparano le
+  fixture, e soprattutto le convenzioni di casa di *quel* progetto — che non
+  stanno in nessun file e che nessun rilevamento potrà mai dedurre.
+
+Le domande seguono la disciplina di `superpowers:brainstorming`: una per volta,
+a scelta multipla dove possibile, mai un muro di domande.
+
+L'intervista **non scrive nulla prima della conferma**, e segnala
+esplicitamente ogni campo rimasto vuoto con la conseguenza che comporta: senza
+comando dei test, il gate non può proteggere niente.
+
+L'output è `.worky.json` più, quando l'utente fornisce convenzioni specifiche
+del progetto, una sezione in `CLAUDE.md` che le registra.
 
 ## Qualità e verifica
 
 I controlli sono hook eseguiti dal runtime, non promesse degli agenti.
 
-- **PostToolUse** su scrittura di `*.php`: `php -l` e CS-Fixer sul singolo file.
-- **Pre-PR**: la suite di test e PHPStan devono passare; in caso contrario la
-  PR non viene aperta.
-- **Regola di completamento**: nessun agente dichiara un task completo senza
-  allegare l'output del comando di test (`verification-before-completion`).
+- **PostToolUse** su scrittura di un `.php`: `php -l` sul singolo file.
+- **PreToolUse** su Bash, quando il comando apre una pull request: la suite di
+  test e l'analisi statica dichiarate in `.worky.json` devono passare, o la PR
+  non viene aperta.
+- Ogni hook che blocca esce con **codice 2** e scrive il motivo su **stderr**,
+  prefissato `worky: `.
 
-**Fallimenti.** Un test rosso attiva `systematic-debugging`: ipotesi, verifica,
-causa radice. Niente patch tentate a caso. Dopo tre fallimenti sullo stesso
-task l'agente si ferma e riporta, invece di accumulare workaround.
-
-**Test del team stesso.** `evals/` contiene casi eseguibili con
-`claude plugin eval`: l'onboarding su un progetto Symfony di prova e una
-feature piccola end-to-end. Così "il team funziona" è una domanda con risposta
-eseguibile.
+Il plugin verifica se stesso con PHPUnit (`composer test`): il rilevamento,
+la configurazione e il comportamento dei due hook sono coperti da test veri,
+eseguiti su processi reali con input reali.
 
 ## Fuori scope per la v1
 
-Agente security, deploy e CI, dashboard, esecuzione schedulata, più progetti in
-parallelo. Pacchetti di stack oltre a `symfony-twig-stimulus`: la struttura che
-li accoglie è nella v1, il loro contenuto no. Da valutare dopo che il team ha
-funzionato su un progetto reale.
+Agenti di ruolo, pipeline e comandi di processo (li fornisce `superpowers`).
+Agente security, deploy e CI, dashboard di visualizzazione, esecuzione
+schedulata. Pacchetti di stack oltre a `symfony-twig-stimulus`: la struttura
+che li accoglie è nella v1, il loro contenuto no.
 
 ## Criteri di successo
 
-1. Il plugin si installa su una macchina pulita e i cinque agenti sono attivi.
+1. Il plugin si installa su una macchina pulita e gli hook risultano attivi.
 2. `/worky:onboard` su un progetto Symfony reale produce un `.worky.json`
-   corretto senza correzioni manuali.
-3. `/worky:feature` su una feature piccola arriva a una PR con test verdi,
-   fermandosi ai due gate previsti.
-4. Gli hook bloccano davvero un commit con PHPStan rosso.
-5. Gli eval passano.
-6. Un pacchetto di stack nuovo si aggiunge creando una cartella e una regola di
-   rilevamento, senza modificare agenti, pipeline o hook.
+   corretto, avendo chiesto ciò che non poteva leggere.
+3. L'hook di lint blocca davvero la scrittura di un PHP con errore di sintassi.
+4. Il gate impedisce davvero l'apertura di una PR con i test rossi.
+5. `composer test` è verde.
+6. Un pacchetto di stack nuovo si aggiunge creando una cartella, senza
+   modificare hook o codice.

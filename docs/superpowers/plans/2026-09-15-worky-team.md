@@ -2,23 +2,26 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Costruire `worky`, un plugin Claude Code che distribuisce un team di cinque agenti capace di portare una feature dalla richiesta alla pull request con test verdi, su qualunque progetto, partendo dal pacchetto di stack Symfony/Twig/Stimulus.
+**Goal:** Costruire `worky`, un plugin Claude Code che aggiunge allo sviluppo agentico i due pezzi che oggi mancano: hook che fanno rispettare i comandi di qualità del progetto, e memoria delle convenzioni di quel progetto raccolta con un'intervista di onboarding.
 
-**Architecture:** Il plugin è un repo git con manifest `.claude-plugin/plugin.json`. La logica deterministica (rilevamento del progetto, gate di qualità) è codice PHP testato con PHPUnit nel repo stesso; la logica agentica (ruoli, pipeline, convenzioni) è markdown in `agents/`, `skills/` e `commands/`. La conoscenza di framework sta in pacchetti sostituibili sotto `skills/stacks/`, selezionati dal rilevamento e registrati in `.worky.json` nel progetto servito.
+**Architecture:** Il plugin è un repo git con manifest `.claude-plugin/plugin.json`. La logica deterministica — lettura della configurazione, osservazione del progetto, gate di qualità — è codice PHP testato con PHPUnit nel repo stesso. La conoscenza di framework sta in pacchetti sostituibili sotto `skills/stacks/`. Il processo di sviluppo non viene riscritto: arriva da `superpowers` e viene richiamato per nome.
 
-**Tech Stack:** PHP 8.2+, PHPUnit 11, Composer, git, `gh`. Nessuna dipendenza runtime: gli script eseguiti come hook usano `require_once` espliciti e non l'autoloader di Composer, perché un plugin installato non ha `vendor/`.
+**Tech Stack:** PHP 8.2+, PHPUnit 11, Composer, git. Nessuna dipendenza runtime: gli script eseguiti come hook usano `require_once` espliciti e non l'autoloader di Composer, perché un plugin installato non ha `vendor/`.
 
 **Spec:** `docs/superpowers/specs/2026-09-15-worky-team-design.md`
 
+**Revisione 2:** questo piano nasceva con quattordici task e comprendeva cinque agenti di ruolo, una skill di pipeline e i comandi di processo. Sono stati rimossi: `superpowers` li fornisce già, e mantenerne una seconda copia divergente sarebbe stato il difetto più costoso del progetto. Il rilevamento automatico in due passate è stato sostituito da un'osservazione sottile più un'intervista, perché i comandi veri di un progetto — un wrapper Docker, un target `make` non standard — non stanno in nessun file e nessun rilevamento può dedurli.
+
 ## Global Constraints
 
-- Nome del plugin: `worky`. Namespace PHP: `Worky\`. Agenti prefissati `worky-`.
+- Nome del plugin: `worky`. Namespace PHP: `Worky\`.
 - Versione PHP minima: `8.2`. Nessuna dipendenza runtime oltre alla standard library.
-- Gli script in `hooks/` NON possono usare `vendor/autoload.php`: usano `require_once` relativi a `__DIR__`.
+- Gli script in `hooks/` e `scripts/` NON possono usare `vendor/autoload.php`: usano `require_once` relativi a `__DIR__`.
 - Ogni hook che blocca esce con **codice 2** e scrive il motivo su **stderr**, prefissato `worky: `.
 - I file `.worky.json` hanno sempre `schema_version: 1`.
-- Aggiungere un pacchetto di stack deve richiedere solo: una cartella in `skills/stacks/` e una riga nelle costanti del detector. Nessuna modifica ad agenti, pipeline o hook.
-- Tutti i testi rivolti all'utente (descrizioni, messaggi di errore, prompt) sono in italiano.
+- Il codice osserva fatti verificabili; le decisioni le prende l'utente. Nessun comando di progetto viene dedotto in silenzio.
+- Aggiungere un pacchetto di stack deve richiedere solo una cartella in `skills/stacks/` e una riga nelle costanti di `ProjectFacts`. Nessuna modifica agli hook.
+- Tutti i testi rivolti all'utente (descrizioni, messaggi di errore, prompt) sono in italiano. Fa eccezione il campo `description:` nel frontmatter delle skill, che è testo di matching per la selezione automatica e resta in inglese.
 - Ogni task termina con un commit.
 
 ---
@@ -164,519 +167,9 @@ git commit -m "Aggiunge lo scheletro del plugin worky con toolchain di test"
 
 ---
 
-### Task 2: Rilevamento di stack, versioni e comando di test
-
-**Files:**
-- Create: `src/ProjectDetector.php`
-- Test: `tests/ProjectDetectorTest.php`
-- Create: `tests/fixtures/symfony-composer-script/composer.json`
-- Create: `tests/fixtures/symfony-plain/composer.json`, `tests/fixtures/symfony-plain/phpunit.xml.dist`
-- Create: `tests/fixtures/laravel-basic/composer.json`
-
-**Interfaces:**
-- Consumes: autoload PSR-4 dal Task 1
-- Produces: `Worky\ProjectDetector::__construct(string $projectDir)` e `detect(): array`. Le chiavi prodotte in questo task sono `schema_version` (int), `framework` (string|null), `stack` (string|null), `php` (string|null), `framework_version` (string|null), `test` (string|null).
-
-- [ ] **Step 1: Creare le fixture**
-
-`tests/fixtures/symfony-composer-script/composer.json`:
-
-```json
-{
-    "require": {
-        "php": ">=8.2",
-        "symfony/framework-bundle": "7.1.*",
-        "symfony/twig-bundle": "7.1.*"
-    },
-    "require-dev": {
-        "phpunit/phpunit": "^11.0"
-    },
-    "scripts": {
-        "test": "phpunit"
-    }
-}
-```
-
-`tests/fixtures/symfony-plain/composer.json`:
-
-```json
-{
-    "require": {
-        "php": ">=8.1",
-        "symfony/framework-bundle": "6.4.*"
-    }
-}
-```
-
-`tests/fixtures/symfony-plain/phpunit.xml.dist`: un file XML minimo, basta `<phpunit/>`.
-
-`tests/fixtures/laravel-basic/composer.json`:
-
-```json
-{
-    "require": {
-        "php": ">=8.2",
-        "laravel/framework": "^11.0"
-    }
-}
-```
-
-- [ ] **Step 2: Scrivere i test che falliscono**
-
-`tests/ProjectDetectorTest.php`:
-
-```php
-<?php
-
-declare(strict_types=1);
-
-namespace Worky\Tests;
-
-use PHPUnit\Framework\TestCase;
-use Worky\ProjectDetector;
-
-final class ProjectDetectorTest extends TestCase
-{
-    private function detect(string $fixture): array
-    {
-        return (new ProjectDetector(__DIR__ . '/fixtures/' . $fixture))->detect();
-    }
-
-    public function testRiconosceSymfonyEAssegnaIlPacchettoDiStack(): void
-    {
-        $result = $this->detect('symfony-composer-script');
-
-        self::assertSame(1, $result['schema_version']);
-        self::assertSame('symfony', $result['framework']);
-        self::assertSame('symfony-twig-stimulus', $result['stack']);
-        self::assertSame('7.1', $result['framework_version']);
-        self::assertSame('8.2', $result['php']);
-    }
-
-    public function testPreferisceLoScriptComposerTestAlBinarioPhpunit(): void
-    {
-        self::assertSame('composer test', $this->detect('symfony-composer-script')['test']);
-    }
-
-    public function testRipiegaSuPhpunitQuandoNonCiSonoScriptNeMakefile(): void
-    {
-        self::assertSame('vendor/bin/phpunit', $this->detect('symfony-plain')['test']);
-    }
-
-    public function testRiconosceIlFrameworkMaLasciaLoStackNulloSenzaPacchetto(): void
-    {
-        $result = $this->detect('laravel-basic');
-
-        self::assertSame('laravel', $result['framework']);
-        self::assertNull($result['stack'], 'Nella v1 non esiste un pacchetto Laravel');
-    }
-}
-```
-
-- [ ] **Step 3: Eseguire i test e verificare che falliscano**
-
-Run: `vendor/bin/phpunit --filter ProjectDetectorTest`
-Expected: FAIL — `Class "Worky\ProjectDetector" not found`.
-
-- [ ] **Step 4: Scrivere l'implementazione minima**
-
-`src/ProjectDetector.php`:
-
-```php
-<?php
-
-declare(strict_types=1);
-
-namespace Worky;
-
-final class ProjectDetector
-{
-    /** Pacchetto composer che identifica il framework => nome del framework. */
-    private const FRAMEWORKS = [
-        'symfony/framework-bundle' => 'symfony',
-        'laravel/framework' => 'laravel',
-    ];
-
-    /**
-     * Framework => pacchetto di stack in skills/stacks/.
-     * Aggiungere un pacchetto significa aggiungere una riga qui.
-     */
-    private const STACK_PACKS = [
-        'symfony' => 'symfony-twig-stimulus',
-    ];
-
-    public function __construct(private readonly string $projectDir)
-    {
-    }
-
-    public function detect(): array
-    {
-        $composer = $this->readJson('composer.json');
-        $framework = $this->detectFramework($composer);
-
-        return [
-            'schema_version' => 1,
-            'framework' => $framework,
-            'stack' => $framework === null ? null : (self::STACK_PACKS[$framework] ?? null),
-            'framework_version' => $this->detectFrameworkVersion($composer, $framework),
-            'php' => $this->versionFrom($composer['require']['php'] ?? null),
-            'test' => $this->detectTestCommand($composer),
-        ];
-    }
-
-    private function detectFramework(array $composer): ?string
-    {
-        $require = $composer['require'] ?? [];
-
-        foreach (self::FRAMEWORKS as $package => $framework) {
-            if (isset($require[$package])) {
-                return $framework;
-            }
-        }
-
-        return null;
-    }
-
-    private function detectFrameworkVersion(array $composer, ?string $framework): ?string
-    {
-        if ($framework === null) {
-            return null;
-        }
-
-        $package = array_search($framework, self::FRAMEWORKS, true);
-
-        return $this->versionFrom($composer['require'][$package] ?? null);
-    }
-
-    private function detectTestCommand(array $composer): ?string
-    {
-        if (isset($composer['scripts']['test'])) {
-            return 'composer test';
-        }
-
-        if ($this->hasMakeTarget('test')) {
-            return 'make test';
-        }
-
-        if ($this->exists('phpunit.xml.dist') || $this->exists('phpunit.xml')) {
-            return 'vendor/bin/phpunit';
-        }
-
-        return null;
-    }
-
-    private function hasMakeTarget(string $target): bool
-    {
-        if (!$this->exists('Makefile')) {
-            return false;
-        }
-
-        $makefile = (string) file_get_contents($this->path('Makefile'));
-
-        return preg_match('/^' . preg_quote($target, '/') . ':/m', $makefile) === 1;
-    }
-
-    private function versionFrom(?string $constraint): ?string
-    {
-        if ($constraint === null) {
-            return null;
-        }
-
-        return preg_match('/(\d+\.\d+)/', $constraint, $matches) === 1 ? $matches[1] : null;
-    }
-
-    private function readJson(string $relative): array
-    {
-        if (!$this->exists($relative)) {
-            return [];
-        }
-
-        return json_decode((string) file_get_contents($this->path($relative)), true) ?? [];
-    }
-
-    private function exists(string $relative): bool
-    {
-        return is_file($this->path($relative));
-    }
-
-    private function path(string $relative): string
-    {
-        return $this->projectDir . '/' . $relative;
-    }
-}
-```
-
-- [ ] **Step 5: Eseguire i test e verificare che passino**
-
-Run: `vendor/bin/phpunit --filter ProjectDetectorTest`
-Expected: PASS (4 test).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/ProjectDetector.php tests/ProjectDetectorTest.php tests/fixtures
-git commit -m "Rileva framework, stack, versioni e comando di test del progetto"
-```
-
 ---
 
-### Task 3: Rilevamento di analisi statica, stile, percorsi, server e fixture
-
-**Files:**
-- Modify: `src/ProjectDetector.php`
-- Modify: `tests/ProjectDetectorTest.php`
-- Create: `tests/fixtures/symfony-full/composer.json`, `phpstan.neon`, `phpunit.xml.dist`, `.php-cs-fixer.dist.php`, `public/index.php`, `src/Entity/.gitkeep`, `src/Controller/.gitkeep`, `templates/.gitkeep`, `assets/controllers/.gitkeep`
-
-**Interfaces:**
-- Consumes: `Worky\ProjectDetector::detect()` dal Task 2
-- Produces: chiavi aggiuntive nell'array di `detect()`: `test_functional` (string|null), `static_analysis` (string|null), `static_analysis_level` (int|null), `cs` (string|null), `server` (string|null), `fixtures` (string|null), `paths` (array con chiavi `entity`, `controller`, `templates`, `assets`, ciascuna string|null)
-
-- [ ] **Step 1: Creare la fixture completa**
-
-`tests/fixtures/symfony-full/composer.json`:
-
-```json
-{
-    "require": {
-        "php": ">=8.3",
-        "symfony/framework-bundle": "7.2.*"
-    },
-    "require-dev": {
-        "doctrine/doctrine-fixtures-bundle": "^3.6",
-        "phpstan/phpstan": "^2.0"
-    }
-}
-```
-
-`tests/fixtures/symfony-full/phpstan.neon`:
-
-```
-parameters:
-    level: 8
-    paths:
-        - src
-```
-
-`tests/fixtures/symfony-full/phpunit.xml.dist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<phpunit>
-    <testsuites>
-        <testsuite name="unit">
-            <directory>tests/Unit</directory>
-        </testsuite>
-        <testsuite name="functional">
-            <directory>tests/Functional</directory>
-        </testsuite>
-    </testsuites>
-</phpunit>
-```
-
-`tests/fixtures/symfony-full/.php-cs-fixer.dist.php`: un file PHP che restituisce un config vuoto, basta `<?php return [];`.
-
-Creare anche i file/cartelle vuoti: `public/index.php` (contenuto `<?php`), `src/Entity/.gitkeep`, `src/Controller/.gitkeep`, `templates/.gitkeep`, `assets/controllers/.gitkeep`.
-
-- [ ] **Step 2: Scrivere i test che falliscono**
-
-Aggiungere a `tests/ProjectDetectorTest.php`:
-
-```php
-    public function testRilevaLaTestsuiteFunzionaleQuandoEDichiarata(): void
-    {
-        self::assertSame(
-            'vendor/bin/phpunit --testsuite functional',
-            $this->detect('symfony-full')['test_functional'],
-        );
-    }
-
-    public function testLasciaNulloIlComandoFunzionaleSenzaTestsuiteDedicata(): void
-    {
-        self::assertNull($this->detect('symfony-plain')['test_functional']);
-    }
-
-    public function testRilevaPhpstanConIlSuoLivello(): void
-    {
-        $result = $this->detect('symfony-full');
-
-        self::assertSame('vendor/bin/phpstan analyse --no-progress', $result['static_analysis']);
-        self::assertSame(8, $result['static_analysis_level']);
-    }
-
-    public function testRilevaPhpCsFixer(): void
-    {
-        self::assertSame('vendor/bin/php-cs-fixer fix', $this->detect('symfony-full')['cs']);
-    }
-
-    public function testRilevaIlComandoDelServerQuandoEsistePublicIndex(): void
-    {
-        self::assertSame('php -S localhost:8000 -t public', $this->detect('symfony-full')['server']);
-    }
-
-    public function testRilevaIlComandoDelleFixtureQuandoIlBundleEPresente(): void
-    {
-        self::assertSame(
-            'php bin/console doctrine:fixtures:load -n --env=test',
-            $this->detect('symfony-full')['fixtures'],
-        );
-    }
-
-    public function testMappaIPercorsiConvenzionaliEsistenti(): void
-    {
-        $paths = $this->detect('symfony-full')['paths'];
-
-        self::assertSame('src/Entity', $paths['entity']);
-        self::assertSame('src/Controller', $paths['controller']);
-        self::assertSame('templates', $paths['templates']);
-        self::assertSame('assets/controllers', $paths['assets']);
-    }
-
-    public function testLasciaNulliIPercorsiCheNonEsistono(): void
-    {
-        self::assertNull($this->detect('symfony-plain')['paths']['entity']);
-    }
-```
-
-- [ ] **Step 3: Eseguire i test e verificare che falliscano**
-
-Run: `vendor/bin/phpunit --filter ProjectDetectorTest`
-Expected: FAIL — chiavi `static_analysis`, `cs`, `server`, `fixtures`, `paths` non definite.
-
-- [ ] **Step 4: Estendere l'implementazione**
-
-In `src/ProjectDetector.php`, estrarre il comando dei test in una variabile locale all'inizio di `detect()`:
-
-```php
-        $test = $this->detectTestCommand($composer);
-```
-
-e usarla nell'array (`'test' => $test,`). Poi aggiungere le chiavi al valore restituito da `detect()`, subito dopo `'test'`:
-
-```php
-            'test_functional' => $this->detectFunctionalTestCommand($test),
-            'static_analysis' => $this->detectStaticAnalysis(),
-            'static_analysis_level' => $this->detectStaticAnalysisLevel(),
-            'cs' => $this->detectCodingStandard(),
-            'server' => $this->detectServer(),
-            'fixtures' => $this->detectFixtures($composer),
-            'paths' => $this->detectPaths(),
-```
-
-e i metodi:
-
-```php
-    private function detectFunctionalTestCommand(?string $testCommand): ?string
-    {
-        if ($testCommand === null) {
-            return null;
-        }
-
-        foreach (['phpunit.xml.dist', 'phpunit.xml'] as $candidate) {
-            if (!$this->exists($candidate)) {
-                continue;
-            }
-
-            $contents = (string) file_get_contents($this->path($candidate));
-
-            if (preg_match('/<testsuite\s+name="([^"]*functional[^"]*)"/i', $contents, $matches) === 1) {
-                return $testCommand . ' --testsuite ' . $matches[1];
-            }
-        }
-
-        return null;
-    }
-
-    private function detectStaticAnalysis(): ?string
-    {
-        if ($this->exists('phpstan.neon') || $this->exists('phpstan.neon.dist')) {
-            return 'vendor/bin/phpstan analyse --no-progress';
-        }
-
-        if ($this->exists('psalm.xml') || $this->exists('psalm.xml.dist')) {
-            return 'vendor/bin/psalm --no-progress';
-        }
-
-        return null;
-    }
-
-    private function detectStaticAnalysisLevel(): ?int
-    {
-        foreach (['phpstan.neon', 'phpstan.neon.dist'] as $candidate) {
-            if (!$this->exists($candidate)) {
-                continue;
-            }
-
-            $contents = (string) file_get_contents($this->path($candidate));
-
-            if (preg_match('/^\s*level:\s*(\d+)/m', $contents, $matches) === 1) {
-                return (int) $matches[1];
-            }
-        }
-
-        return null;
-    }
-
-    private function detectCodingStandard(): ?string
-    {
-        if ($this->exists('.php-cs-fixer.dist.php') || $this->exists('.php-cs-fixer.php')) {
-            return 'vendor/bin/php-cs-fixer fix';
-        }
-
-        if ($this->exists('ecs.php')) {
-            return 'vendor/bin/ecs check --fix';
-        }
-
-        return null;
-    }
-
-    private function detectServer(): ?string
-    {
-        return $this->exists('public/index.php') ? 'php -S localhost:8000 -t public' : null;
-    }
-
-    private function detectFixtures(array $composer): ?string
-    {
-        $dev = $composer['require-dev'] ?? [];
-
-        return isset($dev['doctrine/doctrine-fixtures-bundle'])
-            ? 'php bin/console doctrine:fixtures:load -n --env=test'
-            : null;
-    }
-
-    private function detectPaths(): array
-    {
-        $candidates = [
-            'entity' => 'src/Entity',
-            'controller' => 'src/Controller',
-            'templates' => 'templates',
-            'assets' => 'assets/controllers',
-        ];
-
-        $paths = [];
-
-        foreach ($candidates as $key => $relative) {
-            $paths[$key] = is_dir($this->path($relative)) ? $relative : null;
-        }
-
-        return $paths;
-    }
-```
-
-- [ ] **Step 5: Eseguire i test e verificare che passino**
-
-Run: `composer test`
-Expected: PASS (13 test).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/ProjectDetector.php tests
-git commit -m "Rileva analisi statica, stile, percorsi, server e fixture"
-```
-
----
-
-### Task 4: Lettura e scrittura di `.worky.json`
+### Task 2: Lettura e scrittura di `.worky.json`
 
 **Files:**
 - Create: `src/Config.php`
@@ -684,7 +177,7 @@ git commit -m "Rileva analisi statica, stile, percorsi, server e fixture"
 - Test: `tests/ConfigTest.php`
 
 **Interfaces:**
-- Consumes: l'array prodotto da `ProjectDetector::detect()`
+- Consumes: niente — il contenuto di `.worky.json` lo produce l'intervista di onboarding (Task 7)
 - Produces: `Worky\Config::write(string $projectDir, array $data): string` (restituisce il percorso scritto), `Worky\Config::load(string $projectDir): array` (lancia `Worky\MissingConfigException`), `Worky\Config::FILENAME` = `.worky.json`
 
 - [ ] **Step 1: Scrivere i test che falliscono**
@@ -820,7 +313,7 @@ final class Config
 - [ ] **Step 4: Eseguire i test e verificare che passino**
 
 Run: `composer test`
-Expected: PASS (16 test).
+Expected: PASS (4 test).
 
 - [ ] **Step 5: Commit**
 
@@ -831,7 +324,9 @@ git commit -m "Aggiunge lettura e scrittura di .worky.json"
 
 ---
 
-### Task 5: Hook di lint PHP dopo ogni scrittura
+---
+
+### Task 3: Hook di lint PHP dopo ogni scrittura
 
 **Files:**
 - Create: `hooks/php-lint.php`
@@ -989,14 +484,16 @@ git commit -m "Aggiunge l'hook di lint PHP sulle scritture"
 
 ---
 
-### Task 6: Gate di qualità prima della pull request
+---
+
+### Task 4: Gate di qualità prima della pull request
 
 **Files:**
 - Create: `hooks/pre-pr-gate.php`
 - Test: `tests/Hook/PrePrGateHookTest.php`
 
 **Interfaces:**
-- Consumes: `Worky\Config` (Task 4), incluso con `require_once __DIR__ . '/../src/Config.php'`
+- Consumes: `Worky\Config` (Task 2), incluso con `require_once __DIR__ . '/../src/Config.php'`
 - Produces: `hooks/pre-pr-gate.php`, hook PreToolUse su `Bash`. Intercetta solo i comandi che contengono `gh pr create`; esegue `test` e `static_analysis` presi da `.worky.json` nella directory `$CLAUDE_PROJECT_DIR`. Esce 2 se uno dei due fallisce o se la configurazione manca.
 
 - [ ] **Step 1: Scrivere i test che falliscono**
@@ -1199,14 +696,16 @@ git commit -m "Aggiunge il gate di qualita che precede l'apertura della PR"
 
 ---
 
-### Task 7: Registrazione degli hook nel plugin
+---
+
+### Task 5: Registrazione degli hook nel plugin
 
 **Files:**
 - Create: `hooks/hooks.json`
 - Test: `tests/HooksRegistrationTest.php`
 
 **Interfaces:**
-- Consumes: `hooks/php-lint.php` (Task 5), `hooks/pre-pr-gate.php` (Task 6)
+- Consumes: `hooks/php-lint.php` (Task 3), `hooks/pre-pr-gate.php` (Task 4)
 - Produces: `hooks/hooks.json` nel formato plugin (`{"hooks": {...}}`), con `PostToolUse` su `Write|Edit` e `PreToolUse` su `Bash`
 
 - [ ] **Step 1: Scrivere il test che fallisce**
@@ -1304,7 +803,7 @@ Expected: FAIL — `hooks/hooks.json` non esiste.
 - [ ] **Step 4: Eseguire i test e verificare che passino**
 
 Run: `composer test`
-Expected: PASS (tutti i test, 28 in totale).
+Expected: PASS (tutti i test, 16 in totale).
 
 - [ ] **Step 5: Commit**
 
@@ -1315,199 +814,21 @@ git commit -m "Registra gli hook di lint e del gate pre-PR"
 
 ---
 
-### Task 8: Comando `/worky:onboard`
+---
+
+### Task 6: Pacchetto di stack `symfony-twig-stimulus`
 
 **Files:**
-- Create: `scripts/detect.php`
-- Create: `commands/onboard.md`
-- Test: `tests/DetectScriptTest.php`
-
-**Interfaces:**
-- Consumes: `Worky\ProjectDetector` (Task 2 e 3), `Worky\Config` (Task 4)
-- Produces: `scripts/detect.php` — con `--write <dir>` scrive `.worky.json`, senza flag stampa il JSON rilevato su stdout. Il comando `/worky:onboard` lo esegue, mostra il risultato all'utente e scrive solo dopo conferma.
-
-- [ ] **Step 1: Scrivere il test che fallisce**
-
-`tests/DetectScriptTest.php`:
-
-```php
-<?php
-
-declare(strict_types=1);
-
-namespace Worky\Tests;
-
-use PHPUnit\Framework\TestCase;
-use Worky\Config;
-
-final class DetectScriptTest extends TestCase
-{
-    private function run(array $args): array
-    {
-        $script = __DIR__ . '/../scripts/detect.php';
-        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-        $process = proc_open(array_merge(['php', $script], $args), $descriptors, $pipes);
-
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-
-        return [proc_close($process), $stdout, $stderr];
-    }
-
-    public function testStampaIlRilevamentoSenzaScrivereNulla(): void
-    {
-        $fixture = __DIR__ . '/fixtures/symfony-full';
-
-        [$code, $stdout] = $this->run([$fixture]);
-
-        self::assertSame(0, $code);
-        $data = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
-        self::assertSame('symfony-twig-stimulus', $data['stack']);
-        self::assertFileDoesNotExist($fixture . '/' . Config::FILENAME);
-    }
-
-    public function testConWriteScriveLaConfigurazione(): void
-    {
-        $dir = sys_get_temp_dir() . '/worky-detect-' . bin2hex(random_bytes(6));
-        mkdir($dir);
-        copy(__DIR__ . '/fixtures/symfony-full/composer.json', $dir . '/composer.json');
-
-        [$code] = $this->run(['--write', $dir]);
-
-        self::assertSame(0, $code);
-        self::assertSame('symfony', Config::load($dir)['framework']);
-
-        unlink($dir . '/composer.json');
-        unlink($dir . '/' . Config::FILENAME);
-        rmdir($dir);
-    }
-}
-```
-
-- [ ] **Step 2: Eseguire i test e verificare che falliscano**
-
-Run: `vendor/bin/phpunit --filter DetectScriptTest`
-Expected: FAIL — `scripts/detect.php` non esiste.
-
-- [ ] **Step 3: Scrivere lo script**
-
-`scripts/detect.php`:
-
-```php
-<?php
-
-declare(strict_types=1);
-
-/**
- * Rileva la configurazione di un progetto.
- *
- *   php scripts/detect.php [dir]            stampa il JSON rilevato
- *   php scripts/detect.php --write [dir]    scrive .worky.json nella directory
- *
- * Nessun autoload di Composer: funziona anche da plugin installato.
- */
-
-require_once __DIR__ . '/../src/ProjectDetector.php';
-require_once __DIR__ . '/../src/MissingConfigException.php';
-require_once __DIR__ . '/../src/Config.php';
-
-use Worky\Config;
-use Worky\ProjectDetector;
-
-$args = array_slice($argv, 1);
-$write = in_array('--write', $args, true);
-$positional = array_values(array_filter($args, static fn (string $a): bool => $a !== '--write'));
-$projectDir = rtrim($positional[0] ?? (getenv('CLAUDE_PROJECT_DIR') ?: getcwd()), '/');
-
-if (!is_dir($projectDir)) {
-    fwrite(STDERR, sprintf("worky: la directory %s non esiste.\n", $projectDir));
-    exit(1);
-}
-
-$detected = (new ProjectDetector($projectDir))->detect();
-
-if ($write) {
-    $path = Config::write($projectDir, $detected);
-    fwrite(STDOUT, sprintf("Configurazione scritta in %s\n", $path));
-    exit(0);
-}
-
-fwrite(STDOUT, json_encode($detected, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
-exit(0);
-```
-
-- [ ] **Step 4: Eseguire i test e verificare che passino**
-
-Run: `vendor/bin/phpunit --filter DetectScriptTest`
-Expected: PASS (2 test).
-
-- [ ] **Step 5: Scrivere il comando**
-
-`commands/onboard.md`:
-
-```markdown
----
-description: Rileva stack, comandi e convenzioni del progetto e scrive .worky.json
-allowed-tools: Bash(php:*), Read, Glob, Write, AskUserQuestion
----
-
-## Rilevamento
-
-!`php "${CLAUDE_PLUGIN_ROOT}/scripts/detect.php"`
-
-## Il tuo compito
-
-Il blocco qui sopra è ciò che worky ha deducibilmente rilevato in questo progetto.
-
-1. Presenta il rilevamento all'utente in forma leggibile, non come JSON grezzo:
-   stack, versioni, comando dei test, analisi statica e livello, stile, come si
-   avvia l'applicazione, come si caricano le fixture, percorsi convenzionali.
-
-2. Segnala esplicitamente ogni campo rilevato come `null` e spiega cosa
-   comporta. Un `test` nullo significa che nessun agente potrà dichiarare un
-   task completo: va risolto prima di procedere.
-
-3. Se `stack` è `null` ma `framework` no, dillo chiaramente: il framework è
-   riconosciuto ma non esiste ancora un pacchetto di convenzioni per esso, e il
-   team lavorerà senza conoscenza specifica dello stack.
-
-4. Verifica sul campo i comandi dubbi prima di confermarli. Se il comando dei
-   test è `vendor/bin/phpunit`, controlla che il binario esista davvero.
-
-5. Chiedi conferma all'utente con AskUserQuestion, proponendo le correzioni che
-   ritieni necessarie. **Non scrivere nulla prima della conferma.**
-
-6. Dopo la conferma esegui `php "${CLAUDE_PLUGIN_ROOT}/scripts/detect.php" --write .`
-   e poi applica a mano le eventuali correzioni concordate al file `.worky.json`.
-
-7. Suggerisci all'utente di committare `.worky.json`: è configurazione del
-   progetto, non un file personale.
-```
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add scripts/detect.php commands/onboard.md tests/DetectScriptTest.php
-git commit -m "Aggiunge il comando /worky:onboard e lo script di rilevamento"
-```
-
----
-
-### Task 9: Skill della pipeline (`worky-workflow`)
-
-**Files:**
-- Create: `skills/worky-workflow/SKILL.md`
+- Create: `skills/stacks/symfony-twig-stimulus/SKILL.md`
 - Test: `tests/SkillsFrontmatterTest.php`
 
 **Interfaces:**
-- Consumes: niente
-- Produces: skill `worky-workflow`, richiamata dai comandi `/worky:feature` e `/worky:ship` (Task 13) e citata dagli agenti (Task 11 e 12)
+- Consumes: il campo `stack` di `.worky.json` (Task 2), valorizzato dall'intervista di onboarding (Task 7)
+- Produces: skill `worky-stack-symfony-twig-stimulus`, caricata quando `.worky.json` la indica
 
 - [ ] **Step 1: Scrivere il test che fallisce**
 
-`tests/SkillsFrontmatterTest.php`:
+Creare `tests/SkillsFrontmatterTest.php`:
 
 ```php
 <?php
@@ -1516,6 +837,7 @@ declare(strict_types=1);
 
 namespace Worky\Tests;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class SkillsFrontmatterTest extends TestCase
@@ -1538,12 +860,7 @@ final class SkillsFrontmatterTest extends TestCase
         }
     }
 
-    public function testEsisteLaSkillDellaPipeline(): void
-    {
-        self::assertFileExists(__DIR__ . '/../skills/worky-workflow/SKILL.md');
-    }
-
-    #[\PHPUnit\Framework\Attributes\DataProvider('skillFiles')]
+    #[DataProvider('skillFiles')]
     public function testOgniSkillHaNomeEDescrizioneNelFrontmatter(string $path): void
     {
         $contents = (string) file_get_contents($path);
@@ -1552,99 +869,7 @@ final class SkillsFrontmatterTest extends TestCase
         self::assertSame(1, preg_match('/^name:\s*\S+/m', $matches[1]), "Campo name mancante in $path");
         self::assertSame(1, preg_match('/^description:\s*\S+/m', $matches[1]), "Campo description mancante in $path");
     }
-}
-```
 
-- [ ] **Step 2: Eseguire il test e verificare che fallisca**
-
-Run: `vendor/bin/phpunit --filter SkillsFrontmatterTest`
-Expected: FAIL — `skills/worky-workflow/SKILL.md` non esiste.
-
-- [ ] **Step 3: Scrivere la skill**
-
-`skills/worky-workflow/SKILL.md`:
-
-```markdown
----
-name: worky-workflow
-description: Use when running the worky team pipeline - taking a feature request through spec, plan, parallel implementation, QA and review to a pull request, with the two human gates
----
-
-# La pipeline di worky
-
-Questa skill descrive **come lavora il team**. Non contiene conoscenza di
-framework: quella sta nel pacchetto di stack indicato da `.worky.json`.
-
-## Prerequisito
-
-`.worky.json` deve esistere nella radice del progetto. Se manca, fermati e
-chiedi all'utente di eseguire `/worky:onboard`. Non indovinare mai i comandi di
-un progetto.
-
-Carica il pacchetto di stack indicato dal campo `stack`. Se è `null`, dillo
-all'utente: il team lavorerà senza convenzioni specifiche.
-
-## Le fasi
-
-1. **Spec** — `worky-analyst` esplora il progetto e scrive una spec in
-   `docs/specs/`. → **Gate 1: la approva l'utente.** Non si prosegue senza.
-2. **Piano** — dalla spec nasce un piano a task con dipendenze esplicite
-   (skill `superpowers:writing-plans`).
-3. **Isolamento** — si apre un git worktree per la feature
-   (skill `superpowers:using-git-worktrees`).
-4. **Implementazione** — i task senza dipendenze reciproche vanno in parallelo a
-   `worky-backend` e `worky-frontend`; gli altri in sequenza. Ogni task segue
-   `superpowers:test-driven-development`.
-5. **QA** — `worky-qa` esegue la suite completa e verifica la feature contro la
-   **spec**, non contro il piano.
-6. **Review** — `worky-reviewer` produce i rilievi; tornano agli sviluppatori.
-7. **Consegna** — push del branch e `gh pr create` con descrizione derivata
-   dalla spec. → **Gate 2: merge dell'utente.**
-
-## Regole non negoziabili
-
-- **Completamento provato.** Nessun agente dichiara un task finito senza
-  allegare l'output del comando di test preso da `.worky.json`. Una frase come
-  "i test passano" senza output è un task non finito.
-- **Tre fallimenti e ci si ferma.** Se un agente fallisce tre volte sullo stesso
-  task, smette e riporta cosa ha provato. Non accumula workaround.
-- **Rosso significa indagine.** Un test che fallisce attiva
-  `superpowers:systematic-debugging`: ipotesi, verifica, causa radice. Mai
-  tentativi a caso.
-- **Due giri di review.** Se dopo due cicli di rilievi il team non converge, la
-  pipeline si ferma e chiama l'utente.
-- **I gate sono dell'utente.** Nessun agente approva una spec o mergia una PR.
-```
-
-- [ ] **Step 4: Eseguire i test e verificare che passino**
-
-Run: `vendor/bin/phpunit --filter SkillsFrontmatterTest`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add skills/worky-workflow tests/SkillsFrontmatterTest.php
-git commit -m "Aggiunge la skill della pipeline worky"
-```
-
----
-
-### Task 10: Pacchetto di stack `symfony-twig-stimulus`
-
-**Files:**
-- Create: `skills/stacks/symfony-twig-stimulus/SKILL.md`
-- Modify: `tests/SkillsFrontmatterTest.php`
-
-**Interfaces:**
-- Consumes: il campo `stack` di `.worky.json` (Task 4), valorizzato `symfony-twig-stimulus` dal detector (Task 2)
-- Produces: skill `worky-stack-symfony-twig-stimulus`, caricata dagli agenti quando `.worky.json` la indica
-
-- [ ] **Step 1: Scrivere il test che fallisce**
-
-Aggiungere a `tests/SkillsFrontmatterTest.php`:
-
-```php
     public function testIlPacchettoSymfonyEsisteEDichiaraIlProprioNome(): void
     {
         $path = __DIR__ . '/../skills/stacks/symfony-twig-stimulus/SKILL.md';
@@ -1654,7 +879,7 @@ Aggiungere a `tests/SkillsFrontmatterTest.php`:
         self::assertStringContainsString('name: worky-stack-symfony-twig-stimulus', $contents);
     }
 
-    public function testIlPacchettoNonContieneRiferimentiAllaPipeline(): void
+    public function testIlPacchettoContieneSoloConvenzioni(): void
     {
         $contents = (string) file_get_contents(
             __DIR__ . '/../skills/stacks/symfony-twig-stimulus/SKILL.md',
@@ -1663,9 +888,10 @@ Aggiungere a `tests/SkillsFrontmatterTest.php`:
         self::assertStringNotContainsString(
             'gh pr create',
             $contents,
-            'Il pacchetto di stack deve contenere solo convenzioni, non la pipeline',
+            'Il pacchetto di stack deve contenere convenzioni, non procedure di consegna',
         );
     }
+}
 ```
 
 - [ ] **Step 2: Eseguire i test e verificare che falliscano**
@@ -1740,20 +966,107 @@ git commit -m "Aggiunge il pacchetto di stack symfony-twig-stimulus"
 
 ---
 
-### Task 11: Agenti `analyst` e `backend`
+---
+
+### Task 7: Onboarding a intervista
 
 **Files:**
-- Create: `agents/worky-analyst.md`
-- Create: `agents/worky-backend.md`
-- Test: `tests/AgentsTest.php`
+- Create: `src/ProjectFacts.php`
+- Create: `scripts/observe.php`
+- Create: `commands/onboard.md`
+- Test: `tests/ProjectFactsTest.php`
+- Create: `tests/fixtures/symfony-full/` (`composer.json`, `phpunit.xml.dist`, `phpstan.neon`, `.php-cs-fixer.dist.php`, `Makefile`, `public/index.php`, `src/Entity/.gitkeep`, `src/Controller/.gitkeep`, `templates/.gitkeep`, `assets/controllers/.gitkeep`)
+- Create: `tests/fixtures/laravel-basic/composer.json`
+- Create: `tests/fixtures/vuoto/.gitkeep`
 
 **Interfaces:**
-- Consumes: skill `worky-workflow` (Task 9), pacchetto di stack (Task 10), `.worky.json` (Task 4)
-- Produces: agenti `worky-analyst` e `worky-backend`, invocabili dalla pipeline (Task 13)
+- Consumes: `Worky\Config` (Task 2), il pacchetto `symfony-twig-stimulus` (Task 6)
+- Produces: `Worky\ProjectFacts::__construct(string $projectDir)` e `observe(): array` con le chiavi `framework` (string|null), `stack` (string|null), `php` (string|null), `framework_version` (string|null), `tools` (array<string,bool>), `paths` (array<string,string|null>), `composer_scripts` (list<string>), `make_targets` (list<string>). Inoltre `scripts/observe.php [dir]`, che stampa quei fatti in JSON, e il comando `/worky:onboard`.
 
-- [ ] **Step 1: Scrivere il test che fallisce**
+**Principio che governa questo task:** la classe osserva **fatti verificabili** e non deduce comandi. Che in `composer.json` esista uno script `test` è un fatto; che il comando dei test di questo progetto sia `composer test` è una decisione, e le decisioni le prende l'utente nell'intervista. Un comando dedotto male in silenzio avvelena ogni uso successivo del gate.
 
-`tests/AgentsTest.php`:
+- [ ] **Step 1: Creare le fixture**
+
+`tests/fixtures/symfony-full/composer.json`:
+
+```json
+{
+    "require": {
+        "php": ">=8.3",
+        "symfony/framework-bundle": "7.2.*",
+        "symfony/twig-bundle": "7.2.*"
+    },
+    "require-dev": {
+        "doctrine/doctrine-fixtures-bundle": "^3.6",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^11.0"
+    },
+    "scripts": {
+        "test": "phpunit",
+        "lint": "php-cs-fixer fix"
+    }
+}
+```
+
+`tests/fixtures/symfony-full/Makefile`:
+
+```
+test:
+	docker compose exec php vendor/bin/phpunit
+
+fixtures:
+	docker compose exec php bin/console doctrine:fixtures:load -n
+```
+
+Attenzione: le righe di comando di un Makefile devono iniziare con un TAB, non con spazi.
+
+`tests/fixtures/symfony-full/phpunit.xml.dist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit>
+    <testsuites>
+        <testsuite name="unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="functional">
+            <directory>tests/Functional</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>
+```
+
+`tests/fixtures/symfony-full/phpstan.neon`:
+
+```
+parameters:
+    level: 8
+    paths:
+        - src
+```
+
+`tests/fixtures/symfony-full/.php-cs-fixer.dist.php`: contenuto `<?php return [];`
+
+`tests/fixtures/symfony-full/public/index.php`: contenuto `<?php`
+
+Creare inoltre i file vuoti `src/Entity/.gitkeep`, `src/Controller/.gitkeep`, `templates/.gitkeep`, `assets/controllers/.gitkeep` sotto la stessa fixture.
+
+`tests/fixtures/laravel-basic/composer.json`:
+
+```json
+{
+    "require": {
+        "php": ">=8.2",
+        "laravel/framework": "^11.0"
+    }
+}
+```
+
+`tests/fixtures/vuoto/.gitkeep`: file vuoto.
+
+- [ ] **Step 2: Scrivere i test che falliscono**
+
+`tests/ProjectFactsTest.php`:
 
 ```php
 <?php
@@ -1763,557 +1076,406 @@ declare(strict_types=1);
 namespace Worky\Tests;
 
 use PHPUnit\Framework\TestCase;
+use Worky\ProjectFacts;
 
-final class AgentsTest extends TestCase
+final class ProjectFactsTest extends TestCase
 {
-    private const EXPECTED = [
-        'worky-analyst',
-        'worky-backend',
-    ];
-
-    /** @return iterable<string, array{0: string}> */
-    public static function agentNames(): iterable
+    private function observe(string $fixture): array
     {
-        foreach (self::EXPECTED as $name) {
-            yield $name => [$name];
-        }
+        return (new ProjectFacts(__DIR__ . '/fixtures/' . $fixture))->observe();
     }
 
-    #[\PHPUnit\Framework\Attributes\DataProvider('agentNames')]
-    public function testOgniAgenteEsisteEDichiaraNomeEDescrizione(string $name): void
+    public function testOsservaFrameworkStackEVersioni(): void
     {
-        $path = __DIR__ . '/../agents/' . $name . '.md';
-        self::assertFileExists($path);
+        $facts = $this->observe('symfony-full');
 
-        $contents = (string) file_get_contents($path);
-
-        self::assertSame(1, preg_match('/^---\n(.*?)\n---\n/s', $contents, $matches));
-        self::assertStringContainsString('name: ' . $name, $matches[1]);
-        self::assertSame(1, preg_match('/^description:\s*\S+/m', $matches[1]));
-        self::assertSame(1, preg_match('/^tools:\s*\S+/m', $matches[1]));
+        self::assertSame('symfony', $facts['framework']);
+        self::assertSame('symfony-twig-stimulus', $facts['stack']);
+        self::assertSame('8.3', $facts['php']);
+        self::assertSame('7.2', $facts['framework_version']);
     }
 
-    public function testLAnalystNonPuoScrivereCodice(): void
+    public function testOsservaGliStrumentiPresenti(): void
     {
-        $contents = (string) file_get_contents(__DIR__ . '/../agents/worky-analyst.md');
-        preg_match('/^tools:\s*(.+)$/m', $contents, $matches);
+        $tools = $this->observe('symfony-full')['tools'];
 
-        self::assertStringNotContainsString('Edit', $matches[1]);
+        self::assertTrue($tools['phpunit']);
+        self::assertTrue($tools['phpstan']);
+        self::assertTrue($tools['php_cs_fixer']);
+    }
+
+    public function testElencaGliScriptComposerEITargetMake(): void
+    {
+        $facts = $this->observe('symfony-full');
+
+        self::assertSame(['test', 'lint'], $facts['composer_scripts']);
+        self::assertSame(['test', 'fixtures'], $facts['make_targets']);
+    }
+
+    public function testMappaSoloIPercorsiCheEsistonoDavvero(): void
+    {
+        $paths = $this->observe('symfony-full')['paths'];
+
+        self::assertSame('src/Entity', $paths['entity']);
+        self::assertSame('templates', $paths['templates']);
+    }
+
+    public function testRiconosceIlFrameworkMaLasciaLoStackNulloSenzaPacchetto(): void
+    {
+        $facts = $this->observe('laravel-basic');
+
+        self::assertSame('laravel', $facts['framework']);
+        self::assertNull($facts['stack'], 'Nella v1 non esiste un pacchetto Laravel');
+    }
+
+    public function testNonInventaNullaSuUnProgettoVuoto(): void
+    {
+        $facts = $this->observe('vuoto');
+
+        self::assertNull($facts['framework']);
+        self::assertNull($facts['php']);
+        self::assertSame([], $facts['composer_scripts']);
+        self::assertSame([], $facts['make_targets']);
+        self::assertNull($facts['paths']['entity']);
     }
 }
 ```
 
-- [ ] **Step 2: Eseguire i test e verificare che falliscano**
+- [ ] **Step 3: Eseguire i test e verificare che falliscano**
 
-Run: `vendor/bin/phpunit --filter AgentsTest`
-Expected: FAIL — i file degli agenti non esistono.
+Run: `vendor/bin/phpunit --filter ProjectFactsTest`
+Expected: FAIL — `Class "Worky\ProjectFacts" not found`.
 
-- [ ] **Step 3: Scrivere `agents/worky-analyst.md`**
+- [ ] **Step 4: Scrivere l'implementazione**
 
-```markdown
----
-name: worky-analyst
-description: Trasforma una richiesta di feature in una spec approvabile esplorando il codice esistente, senza scrivere codice di produzione
-tools: Glob, Grep, Read, Write, Bash, WebFetch
-model: opus
----
-
-Sei l'analista del team. Trasformi una richiesta vaga in una spec che un altro
-agente possa implementare senza doverti chiedere nulla.
-
-## Vincoli
-
-- **Non scrivi codice di produzione.** L'unico file che scrivi è la spec.
-- Leggi `.worky.json` prima di tutto. Se manca, fermati e chiedi
-  `/worky:onboard`.
-- Carica il pacchetto di stack indicato e rispettane le convenzioni quando
-  descrivi la soluzione.
-
-## Processo
-
-1. Esplora il codice esistente prima di proporre qualsiasi cosa. Cerca una
-   funzionalità simile già presente: spesso la feature richiesta è una
-   variazione di qualcosa che esiste.
-2. Elenca le domande la cui risposta cambierebbe la soluzione. Ponile
-   all'utente. Non riempire i buchi con assunzioni silenziose.
-3. Scrivi la spec in `docs/specs/YYYY-MM-DD-<nome>.md` con: obiettivo, vincoli,
-   comportamento atteso, casi limite, cosa resta fuori, criteri di accettazione
-   verificabili.
-4. I criteri di accettazione devono essere verificabili da una macchina o da
-   un'ispezione precisa. "L'utente è soddisfatto" non è un criterio.
-
-## Output
-
-Il percorso della spec e un riassunto di dieci righe delle decisioni prese e
-delle alternative scartate, con il motivo.
-```
-
-- [ ] **Step 4: Scrivere `agents/worky-backend.md`**
-
-```markdown
----
-name: worky-backend
-description: Implementa task backend in TDD sul progetto corrente, seguendo le convenzioni del pacchetto di stack e provando il completamento con l'output dei test
-tools: Glob, Grep, Read, Write, Edit, Bash
-model: sonnet
----
-
-Sei lo sviluppatore backend del team. Ricevi **un** task del piano e lo porti a
-termine.
-
-## Prima di toccare qualsiasi cosa
-
-1. Leggi `.worky.json`: da lì prendi il comando dei test, quello di analisi
-   statica, quello di stile e i percorsi. Non inventarli.
-2. Carica il pacchetto di stack indicato nel campo `stack` e seguine le
-   convenzioni.
-3. Leggi il codice intorno al punto in cui interverrai. Il codice esistente ha
-   la precedenza sulle tue preferenze.
-
-## Come lavori
-
-Segui `superpowers:test-driven-development` alla lettera:
-
-1. Scrivi il test che descrive il comportamento richiesto.
-2. Eseguilo e **verifica che fallisca per il motivo giusto**. Un test che
-   fallisce perché la classe non esiste non ha ancora provato nulla.
-3. Scrivi il minimo che lo fa passare.
-4. Rieseguilo.
-5. Rifattorizza con i test verdi.
-
-Quando un test fallisce in modo inatteso usa `superpowers:systematic-debugging`:
-ipotesi, verifica, causa radice. Niente tentativi a caso.
-
-## Quando ti fermi
-
-Dopo **tre** tentativi falliti sullo stesso problema smetti e riporti: cosa hai
-provato, cosa hai osservato, qual è la tua ipotesi migliore. Non accumuli
-workaround.
-
-## Come consegni
-
-Il task è completo solo con:
-
-- il diff dei file toccati,
-- **l'output vero** del comando dei test di `.worky.json`,
-- l'esito dell'analisi statica se configurata.
-
-Senza output dei test il task non è completo, qualunque sia la tua impressione.
-```
-
-- [ ] **Step 5: Eseguire i test e verificare che passino**
-
-Run: `vendor/bin/phpunit --filter AgentsTest`
-Expected: PASS (3 test).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add agents/worky-analyst.md agents/worky-backend.md tests/AgentsTest.php
-git commit -m "Aggiunge gli agenti analyst e backend"
-```
-
----
-
-### Task 12: Agenti `frontend`, `qa` e `reviewer`
-
-**Files:**
-- Create: `agents/worky-frontend.md`
-- Create: `agents/worky-qa.md`
-- Create: `agents/worky-reviewer.md`
-- Modify: `tests/AgentsTest.php`
-
-**Interfaces:**
-- Consumes: le stesse dipendenze del Task 11
-- Produces: agenti `worky-frontend`, `worky-qa`, `worky-reviewer`
-
-- [ ] **Step 1: Estendere il test**
-
-In `tests/AgentsTest.php`, portare la costante a:
-
-```php
-    private const EXPECTED = [
-        'worky-analyst',
-        'worky-backend',
-        'worky-frontend',
-        'worky-qa',
-        'worky-reviewer',
-    ];
-```
-
-e aggiungere:
-
-```php
-    public function testIlQaNonScriveCodiceDiProduzione(): void
-    {
-        $contents = (string) file_get_contents(__DIR__ . '/../agents/worky-qa.md');
-        preg_match('/^tools:\s*(.+)$/m', $contents, $matches);
-
-        self::assertStringNotContainsString('Edit', $matches[1]);
-    }
-
-    public function testIlReviewerNonModificaIlCodiceCheRivede(): void
-    {
-        $contents = (string) file_get_contents(__DIR__ . '/../agents/worky-reviewer.md');
-        preg_match('/^tools:\s*(.+)$/m', $contents, $matches);
-
-        self::assertStringNotContainsString('Edit', $matches[1]);
-    }
-```
-
-- [ ] **Step 2: Eseguire i test e verificare che falliscano**
-
-Run: `vendor/bin/phpunit --filter AgentsTest`
-Expected: FAIL — i tre file non esistono.
-
-- [ ] **Step 3: Scrivere `agents/worky-frontend.md`**
-
-```markdown
----
-name: worky-frontend
-description: Implementa task frontend in TDD - template, controller di comportamento e stili - seguendo le convenzioni del pacchetto di stack e provando il completamento con l'output dei test
-tools: Glob, Grep, Read, Write, Edit, Bash
-model: sonnet
----
-
-Sei lo sviluppatore frontend del team. Ricevi **un** task del piano.
-
-Valgono per te tutte le regole di `worky-backend`: leggi `.worky.json` prima di
-toccare qualsiasi cosa, carica il pacchetto di stack, lavora in TDD, fermati
-dopo tre fallimenti, consegna solo con l'output vero dei test.
-
-In più:
-
-- Una rotta nuova o modificata richiede un test funzionale che verifichi almeno
-  lo status code e un elemento distintivo della pagina.
-- La logica di comportamento sta nei controller lato client, non nei template.
-- Nessuna dipendenza npm nuova senza chiedere all'utente.
-- Verifica il rendering reale quando il progetto dichiara un comando `server` in
-  `.worky.json`: un template che compila non è un template che funziona.
-```
-
-- [ ] **Step 4: Scrivere `agents/worky-qa.md`**
-
-```markdown
----
-name: worky-qa
-description: Verifica in modo indipendente che una feature implementata soddisfi la spec, eseguendo la suite completa e cercando i casi limite che il piano non copriva
-tools: Glob, Grep, Read, Bash
-model: sonnet
----
-
-Sei il QA del team. Il tuo valore è l'**indipendenza**: non hai scritto tu il
-codice e non leggi il piano come fosse la verità.
-
-## Cosa non fai
-
-Non scrivi i test di produzione: li scrive chi implementa, altrimenti il TDD non
-è TDD. Non modifichi il codice. Se trovi un problema, lo descrivi.
-
-## Cosa fai
-
-1. Leggi la **spec**, non il piano. La domanda a cui rispondi è: "questa feature
-   fa ciò che la spec dice?", non "il piano è stato eseguito?".
-2. Esegui la suite completa con il comando di `.worky.json`, non solo i test
-   della feature. Le regressioni stanno altrove.
-3. Esegui l'analisi statica se configurata.
-4. Cerca i casi limite che la spec implica e nessuno ha coperto: input vuoti,
-   valori al confine, concorrenza, permessi, errori di rete, dati assenti.
-5. Quando il progetto dichiara un comando `server`, prova il percorso utente
-   reale, non solo i test.
-
-## Output
-
-Un rapporto con: esito della suite (output vero, non la tua parola), esito
-dell'analisi statica, elenco puntato delle discrepanze rispetto alla spec, e i
-casi limite scoperti, con la loro gravità. Se è tutto a posto, dillo in
-una riga e allega le prove.
-```
-
-- [ ] **Step 5: Scrivere `agents/worky-reviewer.md`**
-
-```markdown
----
-name: worky-reviewer
-description: Fa review avversariale di un diff prima della pull request, cercando difetti di correttezza, violazioni delle convenzioni e duplicazione di codice gia presente nel progetto
-tools: Glob, Grep, Read, Bash
-model: opus
----
-
-Sei il revisore del team. Il tuo compito non è approvare: è trovare ciò che non
-va prima che lo trovi la produzione.
-
-## Cosa non fai
-
-Non modifichi il codice che rivedi. Produci rilievi; le correzioni le fa chi ha
-scritto il codice.
-
-## Cosa cerchi, in quest'ordine
-
-1. **Correttezza.** Per ogni rilievo devi saper dire con quali input concreti il
-   codice produce il risultato sbagliato. Se non sai costruire lo scenario, non
-   è un rilievo: è un'impressione.
-2. **Duplicazione.** Questa cosa esiste già nel progetto? Cerca prima di
-   giudicare. È il difetto più costoso e il meno visibile nei diff.
-3. **Convenzioni.** Confronta con il pacchetto di stack indicato in
-   `.worky.json` e con il codice circostante.
-4. **Test.** I test provano il comportamento o solo che il codice gira? Un test
-   che passerebbe anche con l'implementazione sbagliata non è un test.
-
-## Come riporti
-
-Ogni rilievo ha: file e riga, cosa non va, lo scenario concreto in cui si
-manifesta, e la gravità (bloccante / da sistemare / opinione). Separa le
-opinioni dai difetti: un revisore che le mescola viene ignorato su entrambe.
-
-Se dopo due cicli di rilievi non si converge, fermati e dillo all'utente.
-```
-
-- [ ] **Step 6: Eseguire i test e verificare che passino**
-
-Run: `composer test`
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add agents tests/AgentsTest.php
-git commit -m "Aggiunge gli agenti frontend, qa e reviewer"
-```
-
----
-
-### Task 13: Comandi `/worky:feature` e `/worky:ship`
-
-**Files:**
-- Create: `commands/feature.md`
-- Create: `commands/ship.md`
-- Test: `tests/CommandsTest.php`
-
-**Interfaces:**
-- Consumes: skill `worky-workflow` (Task 9), i cinque agenti (Task 11 e 12)
-- Produces: `/worky:feature <descrizione>` (pipeline completa) e `/worky:ship` (QA, review e PR su un branch già pronto)
-
-- [ ] **Step 1: Scrivere il test che fallisce**
-
-`tests/CommandsTest.php`:
+`src/ProjectFacts.php`:
 
 ```php
 <?php
 
 declare(strict_types=1);
 
-namespace Worky\Tests;
+namespace Worky;
 
-use PHPUnit\Framework\TestCase;
-
-final class CommandsTest extends TestCase
+/**
+ * Osserva un progetto e riporta soltanto fatti verificabili.
+ *
+ * Non deduce comandi: che esista uno script composer "test" è un fatto, che il
+ * comando dei test del progetto sia "composer test" è una decisione, e la
+ * decisione spetta all'utente durante /worky:onboard.
+ */
+final class ProjectFacts
 {
-    /** @return iterable<string, array{0: string}> */
-    public static function commands(): iterable
+    /** Pacchetto composer che identifica il framework => nome del framework. */
+    private const FRAMEWORKS = [
+        'symfony/framework-bundle' => 'symfony',
+        'laravel/framework' => 'laravel',
+    ];
+
+    /**
+     * Framework => pacchetto di convenzioni in skills/stacks/.
+     * Aggiungere un pacchetto significa aggiungere una riga qui.
+     */
+    private const STACK_PACKS = [
+        'symfony' => 'symfony-twig-stimulus',
+    ];
+
+    /** Strumento => file di configurazione che ne prova la presenza. */
+    private const TOOLS = [
+        'phpunit' => ['phpunit.xml.dist', 'phpunit.xml'],
+        'phpstan' => ['phpstan.neon', 'phpstan.neon.dist'],
+        'php_cs_fixer' => ['.php-cs-fixer.dist.php', '.php-cs-fixer.php'],
+    ];
+
+    private const PATHS = [
+        'entity' => 'src/Entity',
+        'controller' => 'src/Controller',
+        'templates' => 'templates',
+        'assets' => 'assets/controllers',
+    ];
+
+    public function __construct(private readonly string $projectDir)
     {
-        foreach (['onboard', 'feature', 'ship'] as $name) {
-            yield $name => [$name];
+    }
+
+    public function observe(): array
+    {
+        $composer = $this->readJson('composer.json');
+        $framework = $this->observeFramework($composer);
+
+        return [
+            'framework' => $framework,
+            'stack' => $framework === null ? null : (self::STACK_PACKS[$framework] ?? null),
+            'php' => $this->versionFrom($composer['require']['php'] ?? null),
+            'framework_version' => $this->frameworkVersion($composer, $framework),
+            'tools' => $this->observeTools(),
+            'paths' => $this->observePaths(),
+            'composer_scripts' => array_keys($composer['scripts'] ?? []),
+            'make_targets' => $this->observeMakeTargets(),
+        ];
+    }
+
+    private function observeFramework(array $composer): ?string
+    {
+        $require = $composer['require'] ?? [];
+
+        foreach (self::FRAMEWORKS as $package => $framework) {
+            if (isset($require[$package])) {
+                return $framework;
+            }
         }
+
+        return null;
     }
 
-    #[\PHPUnit\Framework\Attributes\DataProvider('commands')]
-    public function testOgniComandoEsisteEDichiaraUnaDescrizione(string $name): void
+    private function frameworkVersion(array $composer, ?string $framework): ?string
     {
-        $path = __DIR__ . '/../commands/' . $name . '.md';
-        self::assertFileExists($path);
-
-        $contents = (string) file_get_contents($path);
-
-        self::assertSame(1, preg_match('/^---\n(.*?)\n---\n/s', $contents, $matches));
-        self::assertSame(1, preg_match('/^description:\s*\S+/m', $matches[1]));
-    }
-
-    public function testLaFeatureUsaLArgomentoRicevuto(): void
-    {
-        $contents = (string) file_get_contents(__DIR__ . '/../commands/feature.md');
-
-        self::assertStringContainsString('$ARGUMENTS', $contents);
-    }
-
-    public function testEntrambiIComandiRichiamanoLaSkillDellaPipeline(): void
-    {
-        foreach (['feature', 'ship'] as $name) {
-            $contents = (string) file_get_contents(__DIR__ . '/../commands/' . $name . '.md');
-            self::assertStringContainsString('worky-workflow', $contents, "manca in $name");
+        if ($framework === null) {
+            return null;
         }
+
+        $package = array_search($framework, self::FRAMEWORKS, true);
+
+        return $this->versionFrom($composer['require'][$package] ?? null);
+    }
+
+    private function observeTools(): array
+    {
+        $tools = [];
+
+        foreach (self::TOOLS as $tool => $candidates) {
+            $tools[$tool] = false;
+
+            foreach ($candidates as $candidate) {
+                if ($this->exists($candidate)) {
+                    $tools[$tool] = true;
+                    break;
+                }
+            }
+        }
+
+        return $tools;
+    }
+
+    private function observePaths(): array
+    {
+        $paths = [];
+
+        foreach (self::PATHS as $key => $relative) {
+            $paths[$key] = is_dir($this->path($relative)) ? $relative : null;
+        }
+
+        return $paths;
+    }
+
+    private function observeMakeTargets(): array
+    {
+        if (!$this->exists('Makefile')) {
+            return [];
+        }
+
+        $contents = (string) file_get_contents($this->path('Makefile'));
+        preg_match_all('/^([A-Za-z0-9_-]+):/m', $contents, $matches);
+
+        return $matches[1];
+    }
+
+    private function versionFrom(?string $constraint): ?string
+    {
+        if ($constraint === null) {
+            return null;
+        }
+
+        return preg_match('/(\d+\.\d+)/', $constraint, $matches) === 1 ? $matches[1] : null;
+    }
+
+    private function readJson(string $relative): array
+    {
+        if (!$this->exists($relative)) {
+            return [];
+        }
+
+        return json_decode((string) file_get_contents($this->path($relative)), true) ?? [];
+    }
+
+    private function exists(string $relative): bool
+    {
+        return is_file($this->path($relative));
+    }
+
+    private function path(string $relative): string
+    {
+        return $this->projectDir . '/' . $relative;
     }
 }
 ```
 
-- [ ] **Step 2: Eseguire i test e verificare che falliscano**
-
-Run: `vendor/bin/phpunit --filter CommandsTest`
-Expected: FAIL — `commands/feature.md` e `commands/ship.md` non esistono.
-
-- [ ] **Step 3: Scrivere `commands/feature.md`**
-
-```markdown
----
-description: Porta una feature dalla richiesta alla pull request con il team worky
-argument-hint: <descrizione della feature>
----
-
-## Contesto
-
-- Configurazione del progetto: @.worky.json
-- Branch corrente: !`git branch --show-current`
-- Stato del working tree: !`git status --short`
-
-## Richiesta
-
-$ARGUMENTS
-
-## Il tuo compito
-
-Invoca la skill `worky-workflow` ed eseguila su questa richiesta.
-
-Punti su cui non transigere:
-
-1. Se `.worky.json` non esiste, fermati e chiedi `/worky:onboard`.
-2. Se il working tree non è pulito, chiedi all'utente come procedere prima di
-   creare il worktree.
-3. Dopo che `worky-analyst` ha scritto la spec, **fermati** e falla approvare.
-   È il Gate 1 e non si supera per iniziativa tua.
-4. In implementazione dispatcha in parallelo solo i task che il piano dichiara
-   indipendenti.
-5. Non aprire la pull request se QA o review hanno rilievi bloccanti aperti.
-```
-
-- [ ] **Step 4: Scrivere `commands/ship.md`**
-
-```markdown
----
-description: Esegue QA, review e apertura della pull request su un branch gia pronto
----
-
-## Contesto
-
-- Configurazione del progetto: @.worky.json
-- Branch corrente: !`git branch --show-current`
-- Diff rispetto al branch principale: !`git diff --stat $(git merge-base HEAD origin/HEAD 2>/dev/null || echo HEAD~1)`
-
-## Il tuo compito
-
-Invoca la skill `worky-workflow` ed esegui le sole fasi finali: QA, review e
-consegna.
-
-1. Individua la spec di riferimento in `docs/specs/`. Se non ne esiste una,
-   chiedi all'utente contro cosa vada verificato il lavoro: senza un criterio il
-   QA non ha significato.
-2. Dispatcha `worky-qa` e poi `worky-reviewer`.
-3. Riporta all'utente i rilievi bloccanti prima di procedere.
-4. Solo con tutto risolto, pusha il branch e apri la PR con `gh pr create`,
-   con una descrizione derivata dalla spec. Il gate pre-PR eseguirà da sé test e
-   analisi statica: se blocca, non aggirarlo — risolvi.
-```
-
 - [ ] **Step 5: Eseguire i test e verificare che passino**
 
-Run: `composer test`
-Expected: PASS.
+Run: `vendor/bin/phpunit --filter ProjectFactsTest`
+Expected: PASS (6 test).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Scrivere lo script di osservazione**
 
-```bash
-git add commands tests/CommandsTest.php
-git commit -m "Aggiunge i comandi /worky:feature e /worky:ship"
+`scripts/observe.php`:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Stampa in JSON i fatti osservabili di un progetto.
+ *
+ *   php scripts/observe.php [dir]
+ *
+ * Nessun autoload di Composer: funziona anche da plugin installato.
+ */
+
+require_once __DIR__ . '/../src/ProjectFacts.php';
+
+use Worky\ProjectFacts;
+
+$projectDir = rtrim($argv[1] ?? (getenv('CLAUDE_PROJECT_DIR') ?: getcwd()), '/');
+
+if (!is_dir($projectDir)) {
+    fwrite(STDERR, sprintf("worky: la directory %s non esiste.\n", $projectDir));
+    exit(1);
+}
+
+$facts = (new ProjectFacts($projectDir))->observe();
+
+fwrite(STDOUT, json_encode($facts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+exit(0);
 ```
 
+- [ ] **Step 7: Scrivere il comando di onboarding**
+
+`commands/onboard.md`:
+
+```markdown
+---
+description: Intervista guidata che configura worky su questo progetto e scrive .worky.json
+allowed-tools: Bash(php:*), Bash(ls:*), Bash(cat:*), Read, Glob, Grep, Write, Edit, AskUserQuestion
 ---
 
-### Task 14: Eval del team e verifica end-to-end su un progetto reale
+## Fatti osservati
 
-**Files:**
-- Create: `evals/onboard/` (generata da `claude plugin eval init --bare onboard`)
-- Create: `evals/feature-piccola/` (generata allo stesso modo)
-- Modify: `README.md`
+!`php "${CLAUDE_PLUGIN_ROOT}/scripts/observe.php"`
 
-**Interfaces:**
-- Consumes: tutto il plugin
-- Produces: suite di eval eseguibile con `claude plugin eval .`, e la prova che il plugin installato funziona su un progetto Symfony reale
+## Il tuo compito
 
-- [ ] **Step 1: Generare lo scheletro del primo eval**
+Il blocco qui sopra contiene **fatti verificabili**, non decisioni. Il tuo
+compito è trasformarli in una configurazione, chiedendo all'utente tutto ciò
+che i file non dicono.
 
-Run: `claude plugin eval init --bare onboard`
-Expected: crea un caso vuoto sotto `evals/onboard/`.
+Conduci l'intervista con la disciplina di `superpowers:brainstorming`: **una
+domanda per volta**, a scelta multipla dove possibile, con la tua
+raccomandazione come prima opzione. Mai un muro di domande.
 
-Ispeziona i file generati: sono loro a definire il formato esatto del caso e dei
-grader. Non inventare campi: compila quelli che lo scheletro fornisce.
+### 1. Presenta ciò che hai osservato
 
-- [ ] **Step 2: Compilare il caso `onboard`**
+In forma leggibile, non come JSON grezzo: stack riconosciuto, versioni,
+strumenti presenti, script e target disponibili, percorsi trovati.
 
-Il prompt del caso chiede di eseguire l'onboarding su un progetto Symfony
-minimo. I criteri di valutazione:
+Se `stack` è nullo ma `framework` no, dillo: il framework è riconosciuto ma
+non esiste ancora un pacchetto di convenzioni per esso.
 
-- viene invocato il comando `/worky:onboard` (o lo script di rilevamento);
-- il risultato presenta all'utente stack, comando dei test e percorsi;
-- **non** viene scritto `.worky.json` senza chiedere conferma;
-- i campi rilevati come nulli vengono segnalati esplicitamente.
+### 2. Chiedi i comandi veri, uno alla volta
 
-- [ ] **Step 3: Eseguire l'eval**
+I fatti mostrano quali strumenti esistono, non come si eseguono in questo
+progetto. Proponi le opzioni che hai osservato e lascia scegliere:
 
-Run: `claude plugin eval . --case onboard`
-Expected: il caso viene eseguito e produce un punteggio. Se fallisce, correggi
-`commands/onboard.md` — non il grader — e rilancia.
+- **Comando dei test.** Le opzioni sono gli script composer e i target make
+  osservati, più `vendor/bin/phpunit`. Se fra i target make ne vedi uno che
+  passa da `docker compose`, mettilo per primo: un progetto con Docker quasi
+  sempre esegue i test lì dentro, e un comando che gira fuori dal container
+  fallisce in modi confusi.
+- **Testsuite funzionale**, se `phpunit.xml` ne dichiara una separata.
+- **Analisi statica** e **stile**, solo se i rispettivi strumenti risultano
+  presenti.
+- **Preparazione del database di test**, se il progetto ha le fixture.
+- **Comando per avviare l'applicazione** in locale.
 
-- [ ] **Step 4: Generare e compilare il secondo eval**
+Salta ogni domanda la cui risposta è già certa dai fatti, e non chiedere di
+strumenti che non ci sono.
 
-Run: `claude plugin eval init --bare feature-piccola`
+### 3. Verifica prima di credere
 
-Il caso descrive una feature piccola su un progetto Symfony di prova. Criteri:
+Prima di scrivere, esegui il comando dei test che l'utente ha indicato e
+mostragli l'esito. Un comando sbagliato scoperto adesso costa dieci secondi;
+scoperto dal gate durante una feature, costa una sessione.
 
-- l'analyst produce una spec prima di qualunque codice;
-- la pipeline si **ferma** al Gate 1 invece di implementare;
-- nessun agente dichiara lavoro completo senza output dei test.
+### 4. Chiedi le convenzioni di casa
 
-Il terzo criterio è il più importante: è la regola che distingue un team
-affidabile da uno che riporta successi immaginari.
+Questa è la parte che nessun rilevamento può dedurre e che vale più di tutto
+il resto. Chiedi se in questo progetto valgono regole particolari: cosa può
+parlare col database, dove sta la logica applicativa, come si nominano le
+cose, cosa è vietato. Poni la domanda una volta, in modo aperto, e accetta
+anche "niente di particolare" come risposta.
 
-- [ ] **Step 5: Eseguire tutta la suite**
+### 5. Scrivi, solo dopo conferma
 
-Run: `claude plugin eval .`
-Expected: entrambi i casi eseguiti, punteggi riportati.
+Presenta il riepilogo completo e chiedi conferma con AskUserQuestion. **Non
+scrivere nulla prima.**
 
-- [ ] **Step 6: Installare il plugin e provarlo su un progetto vero**
+Alla conferma scrivi `.worky.json` nella radice del progetto con
+`schema_version: 1` e i campi decisi: `stack`, `test`, `test_functional`,
+`static_analysis`, `cs`, `fixtures`, `server`, `paths`.
 
-```bash
-git -C /Users/eddy2r/eddy/worky rev-parse --show-toplevel
-claude plugin marketplace add /Users/eddy2r/eddy/worky
-claude plugin install worky
+Segnala esplicitamente ogni campo rimasto vuoto con la sua conseguenza: senza
+`test`, il gate che precede la pull request non può proteggere niente.
+
+Se l'utente ha dato convenzioni specifiche del progetto, registrale in una
+sezione `## Convenzioni di progetto` dentro `CLAUDE.md`, creandolo se manca.
+
+### 6. Chiudi
+
+Suggerisci di committare `.worky.json`: è configurazione del progetto, non un
+file personale.
 ```
 
-Poi, in una sessione aperta su un progetto Symfony reale: eseguire
-`/worky:onboard`, verificare che `.worky.json` prodotto sia corretto, e
-controllare che l'hook di lint intervenga davvero introducendo di proposito un
-errore di sintassi in un file PHP.
+- [ ] **Step 8: Eseguire tutta la suite**
 
-Annotare gli scostamenti trovati: sono il materiale della v0.2.
+Run: `composer test`
+Expected: PASS (24 test), output pulito.
 
-- [ ] **Step 7: Aggiornare il README con l'esito**
-
-Documentare la procedura di installazione verificata e i risultati degli eval.
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add evals README.md
-git commit -m "Aggiunge la suite di eval e documenta la verifica end-to-end"
+git add src/ProjectFacts.php scripts/observe.php commands/onboard.md tests/ProjectFactsTest.php tests/fixtures
+git commit -m "Aggiunge l'onboarding a intervista e l'osservazione dei fatti di progetto"
 ```
 
 ---
 
 ## Note per chi esegue
 
-- **Ordine.** I task 1→8 sono sequenziali: ognuno usa il precedente. I task 9 e
-  10 sono indipendenti fra loro. I task 11 e 12 dipendono da 9 e 10. Il 13
-  dipende da 11 e 12. Il 14 chiude.
+- **Ordine.** I task 2→5 sono sequenziali: la configurazione serve al gate, e la
+  registrazione serve a entrambi gli hook. Il task 6 è indipendente da tutti. Il
+  task 7 chiude e dipende dal 2 (scrive `.worky.json`) e dal 6 (nomina il
+  pacchetto di convenzioni).
 - **`composer test` deve restare verde** alla fine di ogni task. Un task che
   lascia rosso il repo non è finito.
 - **Niente `vendor/autoload.php` negli script di `hooks/` e `scripts/`.** È
   l'errore che si scopre solo a plugin installato, quando è tardi.
+- **Il codice non decide.** Dove il piano dice "osserva", intende riportare ciò
+  che i file dichiarano. Trasformare un'osservazione in un comando è compito
+  dell'intervista, non della classe.
+
+## Verifica finale, da fare con l'utente
+
+Non è un task: richiede un progetto reale e la presenza dell'utente.
+
+1. Registrare e installare il plugin:
+   `claude plugin marketplace add <percorso del repo>` poi
+   `claude plugin install worky`.
+2. In una sessione aperta su un progetto Symfony vero, eseguire `/worky:onboard`
+   e controllare che l'intervista chieda ciò che non poteva leggere e che il
+   `.worky.json` prodotto sia corretto.
+3. Introdurre di proposito un errore di sintassi in un file PHP e verificare che
+   l'hook di lint lo blocchi.
+4. Con i test rossi, provare ad aprire una pull request e verificare che il gate
+   la impedisca.
+
+Gli scostamenti trovati qui sono il materiale della v0.2.
