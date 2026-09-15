@@ -1,0 +1,16 @@
+{
+    "require": {
+        "php": ">=8.3",
+        "symfony/framework-bundle": "7.2.*",
+        "symfony/twig-bundle": "7.2.*"
+    },
+    "require-dev": {
+        "doctrine/doctrine-fixtures-bundle": "^3.6",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^11.0"
+    },
+    "scripts": {
+        "test": "phpunit",
+        "lint": "php-cs-fixer fix"
+    }
+}
