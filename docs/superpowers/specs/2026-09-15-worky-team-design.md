@@ -70,6 +70,9 @@ worky/
 │   ├── php-lint.php                 # PostToolUse su Write|Edit
 │   └── pre-pr-gate.php              # PreToolUse su Bash
 ├── commands/onboard.md              # l'intervista
+├── scripts/
+│   ├── observe.php                  # i fatti osservati, in JSON
+│   └── write-config.php             # scrive .worky.json
 ├── skills/stacks/
 │   └── symfony-twig-stimulus/       # unico pacchetto della v1
 └── tests/
@@ -87,8 +90,16 @@ deducibili dalla documentazione ufficiale (organizzazione dei servizi, uso di
 DTO o form, cosa può parlare con Doctrine, livello di PHPStan preteso,
 convenzioni di naming dei controller Stimulus).
 
-Aggiungere un pacchetto (`laravel-blade`, `react`) deve richiedere solo una
-cartella nuova: nessuna modifica agli hook o al resto del plugin.
+Aggiungere un pacchetto (`laravel-blade`) costa **una cartella nuova più una
+riga di codice**: la costante `STACK_PACKS` in `src/ProjectFacts.php` associa
+il framework osservato al pacchetto, e senza quella riga lo `stack` resta nullo
+e il pacchetto non viene mai proposto. Gli hook non si toccano, il resto del
+plugin nemmeno: il costo reale è quella riga, non zero.
+
+`react` e gli altri stack JavaScript sono invece **fuori portata finché
+l'osservazione guarda solo `composer.json`**: un progetto front-end non
+dichiara nulla lì, quindi non verrebbe riconosciuto. Servirebbe prima un
+meccanismo di rilevamento nuovo (`package.json`), che la v1 non ha.
 
 ### Adattamento per progetto
 
@@ -143,6 +154,16 @@ Il plugin verifica se stesso con PHPUnit (`composer test`): il rilevamento,
 la configurazione e il comportamento dei due hook sono coperti da test veri,
 eseguiti su processi reali con input reali.
 
+### Limiti dichiarati della v1
+
+- Il gate legge i comandi da `.worky.json`, che sta nel repo e che un agente
+  può riscrivere: chi può modificare quel file può neutralizzare il gate. Nella
+  v1 la difesa è la revisione umana del diff, non il runtime.
+- I comandi del gate girano **senza passare dal sistema dei permessi**, perché
+  gli hook lo scavalcano, e partono al semplice *tentativo* di aprire una pull
+  request. L'assunzione è che la directory del progetto sia già fidata per
+  eseguire codice — ciò che `composer test` implica già.
+
 ## Fuori scope per la v1
 
 Agenti di ruolo, pipeline e comandi di processo (li fornisce `superpowers`).
@@ -155,8 +176,13 @@ che li accoglie è nella v1, il loro contenuto no.
 1. Il plugin si installa su una macchina pulita e gli hook risultano attivi.
 2. `/worky:onboard` su un progetto Symfony reale produce un `.worky.json`
    corretto, avendo chiesto ciò che non poteva leggere.
-3. L'hook di lint blocca davvero la scrittura di un PHP con errore di sintassi.
-4. Il gate impedisce davvero l'apertura di una PR con i test rossi.
+3. L'hook di lint segnala davvero un PHP con errore di sintassi subito dopo la
+   scrittura, uscendo con codice 2. Un PostToolUse non può impedire la
+   scrittura — arriva dopo —: riporta l'errore mentre il file è ancora fresco,
+   in modo che il lavoro non prosegua sopra un file rotto.
+4. Il gate impedisce davvero l'apertura di una PR con i test rossi, e blocca
+   anche quando è il gate stesso a non poter eseguire i controlli.
 5. `composer test` è verde.
-6. Un pacchetto di stack nuovo si aggiunge creando una cartella, senza
-   modificare hook o codice.
+6. Un pacchetto di stack nuovo si aggiunge creando una cartella e aggiungendo
+   la riga corrispondente a `STACK_PACKS` in `src/ProjectFacts.php`: nessuna
+   modifica agli hook.
