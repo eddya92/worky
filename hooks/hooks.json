@@ -1,0 +1,29 @@
+{
+  "description": "Gate di qualita worky: lint dei file PHP scritti e verifica prima della pull request",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"${CLAUDE_PLUGIN_ROOT}/hooks/php-lint.php\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-pr-gate.php\"",
+            "timeout": 900
+          }
+        ]
+      }
+    ]
+  }
+}
