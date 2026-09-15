@@ -46,7 +46,7 @@ final class SkillsFrontmatterTest extends TestCase
         self::assertStringContainsString('name: worky-stack-symfony-twig-stimulus', $contents);
     }
 
-    public function testIlPacchettoContieneSoloConvenzioni(): void
+    public function testIlPacchettoNonContieneComandiDiConsegna(): void
     {
         $contents = (string) file_get_contents(
             __DIR__ . '/../skills/stacks/symfony-twig-stimulus/SKILL.md',

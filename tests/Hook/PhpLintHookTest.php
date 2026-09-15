@@ -78,4 +78,35 @@ final class PhpLintHookTest extends TestCase
 
         self::assertSame(0, $code);
     }
+
+    public function testControllaAncheLeEstensioniInMaiuscolo(): void
+    {
+        $file = $this->tempFile("<?php\nfunction rotta( {\n", 'PHP');
+
+        [$code, $stderr] = $this->runHook(['tool_name' => 'Write', 'tool_input' => ['file_path' => $file]]);
+
+        self::assertSame(2, $code, 'Foo.PHP resta un file PHP');
+        self::assertStringContainsString('worky:', $stderr);
+    }
+
+    public function testControllaIFilePhtml(): void
+    {
+        $file = $this->tempFile("<?php\nfunction rotta( {\n", 'phtml');
+
+        [$code] = $this->runHook(['tool_name' => 'Write', 'tool_input' => ['file_path' => $file]]);
+
+        self::assertSame(2, $code);
+    }
+
+    public function testControllaUnPercorsoConGliSpazi(): void
+    {
+        $path = sys_get_temp_dir() . '/worky lint ' . bin2hex(random_bytes(4)) . '.php';
+        file_put_contents($path, "<?php\nfunction rotta( {\n");
+        $this->tempFiles[] = $path;
+
+        [$code, $stderr] = $this->runHook(['tool_name' => 'Write', 'tool_input' => ['file_path' => $path]]);
+
+        self::assertSame(2, $code);
+        self::assertStringContainsString($path, $stderr);
+    }
 }

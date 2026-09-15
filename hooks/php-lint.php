@@ -16,11 +16,14 @@ if (!is_array($input)) {
 
 $path = $input['tool_input']['file_path'] ?? '';
 
-if (!is_string($path) || !str_ends_with($path, '.php') || !is_file($path)) {
+// Estensione senza distinzione di maiuscole: Foo.PHP è PHP quanto foo.php.
+if (!is_string($path) || preg_match('/\.(php|phtml|php\d)$/i', $path) !== 1 || !is_file($path)) {
     exit(0);
 }
 
-exec(sprintf('php -l %s 2>&1', escapeshellarg($path)), $output, $code);
+// PHP_BINARY, non un "php" qualunque nel PATH: il lint deve girare con lo
+// stesso interprete che esegue l'hook.
+exec(sprintf('%s -l %s 2>&1', escapeshellarg(PHP_BINARY), escapeshellarg($path)), $output, $code);
 
 if ($code !== 0) {
     fwrite(STDERR, sprintf(
