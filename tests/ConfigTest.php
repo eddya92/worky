@@ -43,6 +43,21 @@ final class ConfigTest extends TestCase
         self::assertStringContainsString("\n    \"schema_version\"", $contents);
     }
 
+    public function testSegnalaLaScritturaFallitaInveceDiProdurreUnFileVuoto(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/worky: impossibile scrivere/');
+
+        Config::write($this->dir . '/directory-che-non-esiste', ['schema_version' => 1]);
+    }
+
+    public function testSegnalaIDatiNonCodificabiliInveceDiTroncareIlFile(): void
+    {
+        $this->expectException(\JsonException::class);
+
+        Config::write($this->dir, ['schema_version' => 1, 'test' => "\xB1\x31"]);
+    }
+
     public function testLanciaUnEccezioneConIstruzioniQuandoLaConfigurazioneManca(): void
     {
         $this->expectException(MissingConfigException::class);

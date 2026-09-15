@@ -8,12 +8,26 @@ final class Config
 {
     public const FILENAME = '.worky.json';
 
+    /**
+     * @throws \JsonException se i dati non sono codificabili
+     * @throws \RuntimeException se il file non si riesce a scrivere
+     */
     public static function write(string $projectDir, array $data): string
     {
         $path = $projectDir . '/' . self::FILENAME;
-        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $json = json_encode(
+            $data,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+        );
 
-        file_put_contents($path, $json . "\n");
+        // La @ sostituisce un warning ignorabile con un errore che si vede:
+        // un .worky.json vuoto o troncato è peggio di una scrittura fallita.
+        if (@file_put_contents($path, $json . "\n") === false) {
+            throw new \RuntimeException(sprintf(
+                'worky: impossibile scrivere %s. Controlla i permessi e che la directory esista.',
+                $path,
+            ));
+        }
 
         return $path;
     }

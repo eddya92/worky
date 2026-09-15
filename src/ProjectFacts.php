@@ -50,21 +50,52 @@ final class ProjectFacts
         $composer = $this->readJson('composer.json');
         $framework = $this->observeFramework($composer);
 
+        $require = $this->requireSection($composer);
+        $scripts = $composer['scripts'] ?? [];
+
         return [
             'framework' => $framework,
             'stack' => $framework === null ? null : (self::STACK_PACKS[$framework] ?? null),
-            'php' => $this->versionFrom($composer['require']['php'] ?? null),
+            'php' => $this->versionFrom($require['php'] ?? null),
             'framework_version' => $this->frameworkVersion($composer, $framework),
             'tools' => $this->observeTools(),
             'paths' => $this->observePaths(),
-            'composer_scripts' => array_keys($composer['scripts'] ?? []),
+            'composer_scripts' => is_array($scripts) ? array_keys($scripts) : [],
             'make_targets' => $this->observeMakeTargets(),
+            'composer_json' => $this->composerJsonStatus(),
         ];
+    }
+
+    /**
+     * Stato leggibile di composer.json: un file illeggibile non è la stessa
+     * cosa di un file assente, e riportarlo come assenza porterebbe
+     * l'intervista a non chiedere nulla proprio dove dovrebbe chiedere di più.
+     */
+    private function composerJsonStatus(): string
+    {
+        if (!$this->exists('composer.json')) {
+            return 'assente';
+        }
+
+        $decoded = json_decode((string) file_get_contents($this->path('composer.json')), true);
+
+        if (!is_array($decoded) || ($decoded !== [] && array_is_list($decoded))) {
+            return 'illeggibile';
+        }
+
+        return 'ok';
+    }
+
+    private function requireSection(array $composer): array
+    {
+        $require = $composer['require'] ?? [];
+
+        return is_array($require) ? $require : [];
     }
 
     private function observeFramework(array $composer): ?string
     {
-        $require = $composer['require'] ?? [];
+        $require = $this->requireSection($composer);
 
         foreach (self::FRAMEWORKS as $package => $framework) {
             if (isset($require[$package])) {
@@ -83,7 +114,7 @@ final class ProjectFacts
 
         $package = array_search($framework, self::FRAMEWORKS, true);
 
-        return $this->versionFrom($composer['require'][$package] ?? null);
+        return $this->versionFrom($this->requireSection($composer)[$package] ?? null);
     }
 
     private function observeTools(): array
@@ -127,9 +158,10 @@ final class ProjectFacts
         return $matches[1];
     }
 
-    private function versionFrom(?string $constraint): ?string
+    /** Il vincolo arriva da un JSON scritto da altri: può essere di qualunque tipo. */
+    private function versionFrom(mixed $constraint): ?string
     {
-        if ($constraint === null) {
+        if (!is_string($constraint)) {
             return null;
         }
 
@@ -142,7 +174,9 @@ final class ProjectFacts
             return [];
         }
 
-        return json_decode((string) file_get_contents($this->path($relative)), true) ?? [];
+        $decoded = json_decode((string) file_get_contents($this->path($relative)), true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     private function exists(string $relative): bool
