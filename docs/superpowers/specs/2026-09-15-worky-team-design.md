@@ -6,8 +6,14 @@
 ## Obiettivo
 
 Un team di agenti specializzati, distribuito come plugin Claude Code, che prende
-una richiesta di feature su un progetto Symfony e la porta fino a una pull
-request con test verdi. Il prodotto è il team, non l'applicazione su cui lavora.
+una richiesta di feature e la porta fino a una pull request con test verdi. Il
+prodotto è il team, non l'applicazione su cui lavora.
+
+Il team è **agnostico rispetto allo stack**. Ruoli, pipeline, gate e hook non
+contengono nulla di specifico di un framework: la conoscenza dello stack vive
+in **pacchetti sostituibili** (`skills/stacks/<nome>/`) selezionati
+automaticamente per progetto. La v1 ne implementa uno solo, Symfony con Twig e
+Stimulus, perché è l'unico validabile su progetti reali fin da subito.
 
 Il team è installato una volta e disponibile su tutti i progetti. Ogni progetto
 dichiara i propri comandi concreti in un file di adattamento; gli agenti
@@ -16,7 +22,8 @@ restano generici.
 ## Vincoli
 
 - **Runtime:** Claude Code. Nessun servizio, nessuna infrastruttura da mantenere.
-- **Stack dei progetti serviti:** PHP 8 / Symfony / Twig / Stimulus / JS vanilla.
+- **Stack dei progetti serviti:** architettura multi-stack; pacchetto
+  implementato nella v1: PHP 8 / Symfony / Twig / Stimulus / JS vanilla.
 - **Gate umani:** due. Approvazione della spec, approvazione della PR.
 - **Consegna:** branch pushato + pull request GitHub via `gh`.
 - **Riuso:** il processo di sviluppo (brainstorming, piani, TDD, debugging,
@@ -47,9 +54,9 @@ worky/
 │   ├── worky-qa.md
 │   └── worky-reviewer.md
 ├── skills/
-│   ├── symfony-conventions/
-│   ├── twig-stimulus/
-│   └── worky-workflow/
+│   ├── worky-workflow/              # pipeline e gate, agnostico
+│   └── stacks/
+│       └── symfony-twig-stimulus/   # unico pacchetto della v1
 ├── commands/
 │   ├── feature.md
 │   ├── onboard.md
@@ -77,15 +84,32 @@ sessione principale.
 `qa` non scrive i test di produzione: li scrive chi implementa, altrimenti il
 TDD non è TDD. Il suo valore è l'indipendenza dal piano.
 
+### Pacchetti di stack
+
+Un pacchetto è una skill in `skills/stacks/<nome>/` che risponde a tre
+domande per il suo stack: quali convenzioni di struttura seguire, come si
+scrive un test, quali errori tipici evitare.
+
+Il contenuto **non** ripete le best practice generiche del framework: quelle il
+modello le conosce. Un pacchetto codifica le regole di casa e le decisioni non
+deducibili dalla documentazione ufficiale (organizzazione dei servizi, uso di
+DTO o form, cosa può parlare con Doctrine, livello di PHPStan preteso,
+convenzioni di naming dei controller Stimulus).
+
+Aggiungere un pacchetto (`laravel-blade`, `react`) deve richiedere solo una
+cartella nuova e una regola di rilevamento: nessuna modifica agli agenti, alla
+pipeline o agli hook. Questo è un criterio di successo verificabile.
+
 ### Adattamento per progetto
 
 `/worky:onboard` ispeziona `composer.json`, `phpunit.xml.dist`, `Makefile`,
 `package.json`, `phpstan.neon` e la struttura delle cartelle, poi scrive
 `.worky.json` nel progetto:
 
+- lo **stack rilevato** e quindi il pacchetto da caricare
 - comando dei test (e separazione unit / functional, se esiste)
 - comando di lint e di analisi statica, con il livello configurato
-- versione di Symfony e di PHP
+- versioni del framework e del linguaggio
 - come si prepara il database di test (fixture, migrazioni)
 - percorsi convenzionali: entity, controller, template, assets Stimulus
 - comando per avviare l'applicazione in locale
@@ -135,7 +159,9 @@ eseguibile.
 ## Fuori scope per la v1
 
 Agente security, deploy e CI, dashboard, esecuzione schedulata, più progetti in
-parallelo. Da valutare dopo che il team ha funzionato su un progetto reale.
+parallelo. Pacchetti di stack oltre a `symfony-twig-stimulus`: la struttura che
+li accoglie è nella v1, il loro contenuto no. Da valutare dopo che il team ha
+funzionato su un progetto reale.
 
 ## Criteri di successo
 
@@ -146,3 +172,5 @@ parallelo. Da valutare dopo che il team ha funzionato su un progetto reale.
    fermandosi ai due gate previsti.
 4. Gli hook bloccano davvero un commit con PHPStan rosso.
 5. Gli eval passano.
+6. Un pacchetto di stack nuovo si aggiunge creando una cartella e una regola di
+   rilevamento, senza modificare agenti, pipeline o hook.
