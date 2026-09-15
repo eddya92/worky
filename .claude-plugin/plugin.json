@@ -1,0 +1,7 @@
+{
+  "name": "worky",
+  "description": "Team di agenti specializzati per lo sviluppo: analyst, backend, frontend, qa, reviewer",
+  "version": "0.1.0",
+  "author": { "name": "eddy2r" },
+  "keywords": ["agents", "workflow", "tdd", "symfony"]
+}
