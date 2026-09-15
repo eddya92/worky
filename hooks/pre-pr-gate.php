@@ -21,7 +21,10 @@ if (!is_array($input) || ($input['tool_name'] ?? '') !== 'Bash') {
 
 $command = $input['tool_input']['command'] ?? '';
 
-if (!is_string($command) || preg_match('/\bgh\s+pr\s+create\b/', $command) !== 1) {
+// Match "gh pr create" only in command position: at the start, or after a command
+// separator (;, &&, ||, |), inside a subshell, or after a newline.
+// Deliberately does not catch invocations nested in sh -c "..." — an accepted risk.
+if (!is_string($command) || preg_match('/(?:^|[;&|(`\n]|\$\()\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*gh\s+pr\s+create\b/', $command) !== 1) {
     exit(0);
 }
 

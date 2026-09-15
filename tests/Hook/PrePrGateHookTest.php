@@ -105,4 +105,33 @@ final class PrePrGateHookTest extends TestCase
 
         self::assertSame(0, $code);
     }
+
+    public function testNonAttivaIlGatePerMenzioniDelFrase(): void
+    {
+        Config::write($this->dir, ['schema_version' => 1, 'test' => 'false']);
+
+        [$code] = $this->runHook($this->bashPayload('echo "ricorda: gh pr create dopo il merge"'));
+
+        self::assertSame(0, $code);
+    }
+
+    public function testAttivaIlGatePerComandoInCatena(): void
+    {
+        Config::write($this->dir, ['schema_version' => 1, 'test' => 'false']);
+
+        [$code, $stderr] = $this->runHook($this->bashPayload('make lint && gh pr create --fill'));
+
+        self::assertSame(2, $code);
+        self::assertStringContainsString('test', $stderr);
+    }
+
+    public function testAttivaIlGatePerComandonellaSubshell(): void
+    {
+        Config::write($this->dir, ['schema_version' => 1, 'test' => 'false']);
+
+        [$code, $stderr] = $this->runHook($this->bashPayload('$(gh pr create --fill)'));
+
+        self::assertSame(2, $code);
+        self::assertStringContainsString('test', $stderr);
+    }
 }
