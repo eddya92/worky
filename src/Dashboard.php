@@ -20,9 +20,14 @@ final class Dashboard
 
         $sessioni = array_filter(array_unique(array_column($eventi, 'session')));
 
+        // Un agente non è una sessione: i subagenti condividono la sessione del
+        // padre e si distinguono solo per la propria trascrizione.
+        $agenti = array_filter(array_unique(array_column($eventi, 'agente')));
+
         return (string) json_encode([
             'eventi' => $eventi,
             'sessioni' => count($sessioni),
+            'agenti' => count($agenti),
             'aggiornato' => date('c'),
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }

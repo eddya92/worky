@@ -27,8 +27,11 @@ try {
 
     $toolInput = is_array($input['tool_input'] ?? null) ? $input['tool_input'] : [];
 
-    // Il bersaglio è ciò su cui lo strumento ha agito: un comando o un file.
-    $target = $toolInput['command'] ?? $toolInput['file_path'] ?? null;
+    // Il bersaglio è ciò su cui lo strumento ha agito: un comando, un file, o —
+    // quando si lancia un subagente — il compito che gli è stato dato. Il suo
+    // prompt invece non si registra mai: è lungo e spesso contiene lavoro in
+    // corso che non ha motivo di finire in un file sul disco.
+    $target = $toolInput['command'] ?? $toolInput['file_path'] ?? $toolInput['description'] ?? null;
 
     if (is_string($target) && mb_strlen($target) > BERSAGLIO_MAX) {
         $target = mb_substr($target, 0, BERSAGLIO_MAX - 1) . '…';
@@ -40,10 +43,20 @@ try {
         exit(0);
     }
 
+    // Ogni agente ha la propria trascrizione: il nome di quel file è l'unica
+    // cosa che distingue un subagente dalla sessione che lo ha lanciato, dato
+    // che session_id resta quello del padre.
+    $trascrizione = $input['transcript_path'] ?? null;
+    $agente = is_string($trascrizione) && $trascrizione !== ''
+        ? pathinfo($trascrizione, PATHINFO_FILENAME)
+        : null;
+
     EventLog::append($projectDir, [
         'event' => is_string($input['hook_event_name'] ?? null) ? $input['hook_event_name'] : 'sconosciuto',
         'tool' => is_string($input['tool_name'] ?? null) ? $input['tool_name'] : null,
         'target' => is_string($target) ? $target : null,
+        'tipo' => is_string($toolInput['subagent_type'] ?? null) ? $toolInput['subagent_type'] : null,
+        'agente' => $agente,
         'session' => is_string($input['session_id'] ?? null) ? $input['session_id'] : null,
     ]);
 } catch (\Throwable) {

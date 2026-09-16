@@ -102,6 +102,59 @@ final class EventLogHookTest extends TestCase
         self::assertLessThanOrEqual(160, mb_strlen(EventLog::tail($this->dir)[0]['target']));
     }
 
+    public function testDistingueLAgenteDalNomeDellaSuaTrascrizione(): void
+    {
+        $this->send([
+            'hook_event_name' => 'SubagentStop',
+            'session_id' => 'sessione-padre',
+            'transcript_path' => '/Users/tizio/.claude/sessions/9f3c21ab-figlio.jsonl',
+        ]);
+
+        $evento = EventLog::tail($this->dir)[0];
+
+        self::assertSame('9f3c21ab-figlio', $evento['agente']);
+        self::assertSame('sessione-padre', $evento['session'], 'La sessione resta quella padre');
+    }
+
+    public function testLasciaNulloLAgenteSenzaTrascrizione(): void
+    {
+        $this->send(['hook_event_name' => 'Stop', 'session_id' => 'a']);
+
+        self::assertNull(EventLog::tail($this->dir)[0]['agente']);
+    }
+
+    public function testRegistraIlCompitoEIlTipoDiUnSubagenteLanciato(): void
+    {
+        $this->send([
+            'hook_event_name' => 'PreToolUse',
+            'tool_name' => 'Task',
+            'tool_input' => [
+                'description' => 'Implementa il riepilogo ordine',
+                'subagent_type' => 'general-purpose',
+                'prompt' => 'un prompt lunghissimo che non ci interessa registrare',
+            ],
+        ]);
+
+        $evento = EventLog::tail($this->dir)[0];
+
+        self::assertSame('Implementa il riepilogo ordine', $evento['target']);
+        self::assertSame('general-purpose', $evento['tipo']);
+    }
+
+    public function testNonRegistraIlPromptDiUnSubagente(): void
+    {
+        $this->send([
+            'hook_event_name' => 'PreToolUse',
+            'tool_name' => 'Task',
+            'tool_input' => ['description' => 'Breve', 'prompt' => 'SEGRETO-DA-NON-REGISTRARE'],
+        ]);
+
+        self::assertStringNotContainsString(
+            'SEGRETO-DA-NON-REGISTRARE',
+            (string) file_get_contents(EventLog::path($this->dir)),
+        );
+    }
+
     public function testNonBloccaMaiNienteNemmenoConUnPayloadRotto(): void
     {
         self::assertSame(0, $this->runHook('{questo non e json'));

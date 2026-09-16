@@ -53,12 +53,25 @@ final class DashboardTest extends TestCase
         self::assertSame(2, $this->decodedEvents()['sessioni']);
     }
 
+    public function testContaGliAgentiDistintiNonSoloLeSessioni(): void
+    {
+        EventLog::append($this->dir, ['event' => 'PreToolUse', 'session' => 'padre', 'agente' => 'padre-1']);
+        EventLog::append($this->dir, ['event' => 'PreToolUse', 'session' => 'padre', 'agente' => 'figlio-a']);
+        EventLog::append($this->dir, ['event' => 'PreToolUse', 'session' => 'padre', 'agente' => 'figlio-b']);
+
+        $payload = $this->decodedEvents();
+
+        self::assertSame(1, $payload['sessioni'], 'La sessione e una sola');
+        self::assertSame(3, $payload['agenti'], 'Ma gli agenti al lavoro sono tre');
+    }
+
     public function testNonSiRompeSuUnProgettoSenzaDiario(): void
     {
         $payload = $this->decodedEvents();
 
         self::assertSame([], $payload['eventi']);
         self::assertSame(0, $payload['sessioni']);
+        self::assertSame(0, $payload['agenti']);
     }
 
     public function testLaPaginaEHtmlCompletoConIlPuntoDiAggancioDegliEventi(): void

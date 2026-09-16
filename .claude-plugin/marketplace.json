@@ -11,7 +11,7 @@
       "name": "worky",
       "source": "./",
       "description": "Esegue i comandi di qualità del tuo progetto e impedisce di proseguire col rosso, e ricorda come si fanno le cose in quel repo.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "workflow"
     }
   ]

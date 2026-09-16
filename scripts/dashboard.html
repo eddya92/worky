@@ -130,7 +130,7 @@
     <span class="polso" id="polso">in ascolto</span>
     <div class="cifre">
       <div class="cifra"><b id="totale">0</b><small>eventi</small></div>
-      <div class="cifra"><b id="sessioni">0</b><small>sessioni</small></div>
+      <div class="cifra"><b id="agenti">0</b><small>agenti</small></div>
     </div>
   </header>
 
@@ -184,11 +184,16 @@
     const perSessione = new Map();
 
     for (const e of eventi) {
-      const chiave = e.session || "senza nome";
-      if (!perSessione.has(chiave)) perSessione.set(chiave, { conteggio: 0, ultimo: null });
+      // Un subagente condivide la sessione del padre: lo distingue la trascrizione.
+      const chiave = e.agente || e.session || "senza nome";
+      if (!perSessione.has(chiave)) {
+        perSessione.set(chiave, { conteggio: 0, ultimo: null, compito: null, tipo: null });
+      }
       const corsia = perSessione.get(chiave);
       corsia.conteggio += 1;
       corsia.ultimo = e;
+      if (e.tool === "Task" && e.target) corsia.compito = e.target;
+      if (e.tipo) corsia.tipo = e.tipo;
     }
 
     const contenitore = document.getElementById("corsie");
@@ -214,9 +219,12 @@
       nodo.querySelector(".stato").textContent = lavora
         ? "al lavoro"
         : `${corsia.conteggio} eventi`;
-      nodo.querySelector(".ultimo").textContent =
+      const attivita =
         `${NOMI[corsia.ultimo.event] || corsia.ultimo.event}` +
         (corsia.ultimo.tool ? ` · ${corsia.ultimo.tool}` : "");
+      nodo.querySelector(".ultimo").textContent = corsia.compito
+        ? `${corsia.compito}${corsia.tipo ? ` (${corsia.tipo})` : ""} — ${attivita}`
+        : attivita;
       return nodo;
     }));
   }
@@ -236,7 +244,7 @@
         <td class="strumento"></td>
         <td class="bersaglio"></td>`;
       riga.querySelector(".ora").textContent = ora(e.ts);
-      riga.querySelector(".pallino").style.background = tinta(e.session || "senza nome");
+      riga.querySelector(".pallino").style.background = tinta(e.agente || e.session || "senza nome");
       riga.querySelector(".che").textContent = NOMI[e.event] || e.event || "?";
       riga.querySelector(".strumento").textContent = e.tool || "";
       riga.querySelector(".bersaglio").textContent = e.target || "";
@@ -252,7 +260,7 @@
       const dati = await risposta.json();
 
       document.getElementById("totale").textContent = dati.eventi.length;
-      document.getElementById("sessioni").textContent = dati.sessioni;
+      document.getElementById("agenti").textContent = dati.agenti;
 
       disegnaCorsie(dati.eventi);
       disegnaFlusso(dati.eventi);
