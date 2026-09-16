@@ -1,0 +1,270 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>worky — diario della sessione</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --sfondo: #f7f7f5;
+    --carta: #ffffff;
+    --bordo: #e3e2dd;
+    --testo: #1c1c1a;
+    --tenue: #76746c;
+    --acceso: #2f7d46;
+    --fermo: #9a6b2f;
+    --raggio: 10px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --sfondo: #16161a;
+      --carta: #1e1e23;
+      --bordo: #30303a;
+      --testo: #ececef;
+      --tenue: #9a9aa4;
+      --acceso: #57c47b;
+      --fermo: #d3a24f;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 24px 16px 48px;
+    background: var(--sfondo);
+    color: var(--testo);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  .contenuto { max-width: 1100px; margin: 0 auto; }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 16px;
+    margin-bottom: 20px;
+  }
+
+  h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  h1 span { color: var(--tenue); font-weight: 400; }
+
+  .polso {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--tenue);
+    font-size: 12px;
+  }
+
+  .polso::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--acceso);
+    animation: respiro 2s ease-in-out infinite;
+  }
+
+  .polso.spento::before { background: var(--fermo); animation: none; }
+
+  @keyframes respiro { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+  .cifre { display: flex; gap: 20px; margin-left: auto; }
+  .cifra { text-align: right; }
+  .cifra b { display: block; font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .cifra small { color: var(--tenue); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  .colonne { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 760px) { .colonne { grid-template-columns: minmax(0, 1fr); } }
+
+  section {
+    background: var(--carta);
+    border: 1px solid var(--bordo);
+    border-radius: var(--raggio);
+    padding: 14px 16px;
+  }
+
+  h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--tenue);
+    margin: 0 0 12px;
+    font-weight: 600;
+  }
+
+  .corsia { padding: 9px 0; border-top: 1px solid var(--bordo); }
+  .corsia:first-of-type { border-top: 0; padding-top: 0; }
+
+  .corsia .riga { display: flex; align-items: center; gap: 8px; }
+  .corsia .nome { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .corsia .stato { margin-left: auto; font-size: 11px; color: var(--tenue); }
+  .corsia .stato.lavora { color: var(--acceso); }
+  .corsia .ultimo { color: var(--tenue); font-size: 12px; margin-top: 2px; }
+
+  .pallino { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 6px 8px 6px 0; border-top: 1px solid var(--bordo); vertical-align: top; }
+  tr:first-child td { border-top: 0; }
+
+  .ora { color: var(--tenue); font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12px; }
+  .che { white-space: nowrap; font-size: 12px; }
+  .strumento { font-weight: 600; white-space: nowrap; }
+  .bersaglio {
+    color: var(--tenue);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    word-break: break-all;
+  }
+
+  .vuoto { color: var(--tenue); padding: 8px 0; }
+  .flusso-contenitore { max-height: 70vh; overflow-y: auto; }
+</style>
+
+<div class="contenuto">
+  <header>
+    <h1>worky <span>— diario della sessione</span></h1>
+    <span class="polso" id="polso">in ascolto</span>
+    <div class="cifre">
+      <div class="cifra"><b id="totale">0</b><small>eventi</small></div>
+      <div class="cifra"><b id="sessioni">0</b><small>sessioni</small></div>
+    </div>
+  </header>
+
+  <div class="colonne">
+    <section>
+      <h2>Chi sta lavorando</h2>
+      <div id="corsie"><p class="vuoto">Nessuna attività ancora.</p></div>
+    </section>
+
+    <section>
+      <h2>Flusso degli eventi</h2>
+      <div class="flusso-contenitore">
+        <table><tbody id="eventi"></tbody></table>
+      </div>
+      <p class="vuoto" id="nessunEvento">
+        Nessun evento registrato. Lavora su questo progetto in una sessione di Claude Code e
+        comparirà qui.
+      </p>
+    </section>
+  </div>
+</div>
+
+<script>
+  const NOMI = {
+    PreToolUse: "inizia",
+    PostToolUse: "finisce",
+    SubagentStop: "subagente concluso",
+    Stop: "sessione ferma",
+    SessionStart: "sessione avviata",
+  };
+
+  // Un colore stabile per sessione, così l'occhio segue la stessa corsia.
+  function tinta(chiave) {
+    let somma = 0;
+    for (const c of chiave || "?") somma = (somma * 31 + c.charCodeAt(0)) % 360;
+    return `hsl(${somma} 62% 52%)`;
+  }
+
+  function breve(sessione) {
+    if (!sessione) return "senza nome";
+    return sessione.length > 8 ? sessione.slice(0, 8) : sessione;
+  }
+
+  function ora(ts) {
+    if (!ts) return "";
+    const d = new Date(ts);
+    return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString();
+  }
+
+  function disegnaCorsie(eventi) {
+    const perSessione = new Map();
+
+    for (const e of eventi) {
+      const chiave = e.session || "senza nome";
+      if (!perSessione.has(chiave)) perSessione.set(chiave, { conteggio: 0, ultimo: null });
+      const corsia = perSessione.get(chiave);
+      corsia.conteggio += 1;
+      corsia.ultimo = e;
+    }
+
+    const contenitore = document.getElementById("corsie");
+
+    if (perSessione.size === 0) {
+      contenitore.innerHTML = '<p class="vuoto">Nessuna attività ancora.</p>';
+      return;
+    }
+
+    contenitore.replaceChildren(...[...perSessione.entries()].reverse().map(([chiave, corsia]) => {
+      const lavora = corsia.ultimo.event === "PreToolUse";
+      const nodo = document.createElement("div");
+      nodo.className = "corsia";
+      nodo.innerHTML = `
+        <div class="riga">
+          <span class="pallino"></span>
+          <span class="nome"></span>
+          <span class="stato ${lavora ? "lavora" : ""}"></span>
+        </div>
+        <div class="ultimo"></div>`;
+      nodo.querySelector(".pallino").style.background = tinta(chiave);
+      nodo.querySelector(".nome").textContent = breve(chiave);
+      nodo.querySelector(".stato").textContent = lavora
+        ? "al lavoro"
+        : `${corsia.conteggio} eventi`;
+      nodo.querySelector(".ultimo").textContent =
+        `${NOMI[corsia.ultimo.event] || corsia.ultimo.event}` +
+        (corsia.ultimo.tool ? ` · ${corsia.ultimo.tool}` : "");
+      return nodo;
+    }));
+  }
+
+  function disegnaFlusso(eventi) {
+    const corpo = document.getElementById("eventi");
+    const avviso = document.getElementById("nessunEvento");
+
+    avviso.hidden = eventi.length > 0;
+
+    corpo.replaceChildren(...[...eventi].reverse().map((e) => {
+      const riga = document.createElement("tr");
+      riga.innerHTML = `
+        <td class="ora"></td>
+        <td><span class="pallino" style="display:inline-block"></span></td>
+        <td class="che"></td>
+        <td class="strumento"></td>
+        <td class="bersaglio"></td>`;
+      riga.querySelector(".ora").textContent = ora(e.ts);
+      riga.querySelector(".pallino").style.background = tinta(e.session || "senza nome");
+      riga.querySelector(".che").textContent = NOMI[e.event] || e.event || "?";
+      riga.querySelector(".strumento").textContent = e.tool || "";
+      riga.querySelector(".bersaglio").textContent = e.target || "";
+      return riga;
+    }));
+  }
+
+  async function aggiorna() {
+    const polso = document.getElementById("polso");
+
+    try {
+      const risposta = await fetch("/events", { cache: "no-store" });
+      const dati = await risposta.json();
+
+      document.getElementById("totale").textContent = dati.eventi.length;
+      document.getElementById("sessioni").textContent = dati.sessioni;
+
+      disegnaCorsie(dati.eventi);
+      disegnaFlusso(dati.eventi);
+
+      polso.classList.remove("spento");
+      polso.textContent = "in ascolto";
+    } catch (errore) {
+      polso.classList.add("spento");
+      polso.textContent = "server non raggiungibile";
+    }
+  }
+
+  aggiorna();
+  setInterval(aggiorna, 1000);
+</script>
