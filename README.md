@@ -29,7 +29,7 @@ controlli, blocca la pull request invece di lasciarla passare.
 - **`.worky.json`** nella radice del progetto servito dichiara i comandi veri
   di quel repo: `test`, `static_analysis`, `cs`, `fixtures`, `server`, più lo
   `stack` e i `paths` convenzionali. Gli agenti non indovinano mai un comando.
-- **`skills/stacks/<nome>/`** sono i pacchetti di convenzioni di stack: non
+- **`skills/worky-stack-<nome>/`** sono i pacchetti di convenzioni di stack: non
   ripetono le best practice del framework, codificano le regole di casa. Nella
   v1 esiste `symfony-twig-stimulus`, caricabile come skill
   `worky-stack-symfony-twig-stimulus`.
@@ -106,8 +106,8 @@ worky/
 ├── scripts/
 │   ├── observe.php                  # i fatti osservati, in JSON
 │   └── write-config.php             # scrive .worky.json
-├── skills/stacks/
-│   └── symfony-twig-stimulus/
+├── skills/
+│   └── worky-stack-symfony-twig-stimulus/
 ├── src/                             # Config, ProjectFacts
 └── tests/
 ```

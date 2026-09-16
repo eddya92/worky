@@ -73,14 +73,14 @@ worky/
 ├── scripts/
 │   ├── observe.php                  # i fatti osservati, in JSON
 │   └── write-config.php             # scrive .worky.json
-├── skills/stacks/
-│   └── symfony-twig-stimulus/       # unico pacchetto della v1
+├── skills/
+│   └── worky-stack-symfony-twig-stimulus/   # unico pacchetto della v1
 └── tests/
 ```
 
 ### Pacchetti di stack
 
-Un pacchetto è una skill in `skills/stacks/<nome>/` che risponde a tre domande
+Un pacchetto è una skill in `skills/worky-stack-<nome>/` che risponde a tre domande
 per il suo stack: quali convenzioni di struttura seguire, come si scrive un
 test, quali errori tipici evitare.
 

@@ -37,9 +37,26 @@ final class SkillsFrontmatterTest extends TestCase
         self::assertSame(1, preg_match('/^description:\s*\S+/m', $matches[1]), "Campo description mancante in $path");
     }
 
+    /**
+     * Il loader dei plugin carica skills/<nome>/SKILL.md e non scende oltre:
+     * un pacchetto annidato piu' in profondita' e' invisibile, e nessun altro
+     * test se ne accorgerebbe. E' successo davvero.
+     */
+    #[DataProvider('skillFiles')]
+    public function testOgniSkillStaDoveIlLoaderLaTrova(string $path): void
+    {
+        $dopoSkills = substr($path, strrpos($path, '/skills/') + strlen('/skills/'));
+
+        self::assertSame(
+            2,
+            count(explode('/', $dopoSkills)),
+            "La skill $dopoSkills e' annidata troppo in profondita': il loader carica solo skills/<nome>/SKILL.md",
+        );
+    }
+
     public function testIlPacchettoSymfonyEsisteEDichiaraIlProprioNome(): void
     {
-        $path = __DIR__ . '/../skills/stacks/symfony-twig-stimulus/SKILL.md';
+        $path = __DIR__ . '/../skills/worky-stack-symfony-twig-stimulus/SKILL.md';
         self::assertFileExists($path);
 
         $contents = (string) file_get_contents($path);
@@ -49,7 +66,7 @@ final class SkillsFrontmatterTest extends TestCase
     public function testIlPacchettoNonContieneComandiDiConsegna(): void
     {
         $contents = (string) file_get_contents(
-            __DIR__ . '/../skills/stacks/symfony-twig-stimulus/SKILL.md',
+            __DIR__ . '/../skills/worky-stack-symfony-twig-stimulus/SKILL.md',
         );
 
         self::assertStringNotContainsString(

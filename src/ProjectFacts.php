@@ -20,7 +20,7 @@ final class ProjectFacts
     ];
 
     /**
-     * Framework => pacchetto di convenzioni in skills/stacks/.
+     * Framework => pacchetto di convenzioni in skills/worky-stack-<nome>/.
      * Aggiungere un pacchetto significa aggiungere una riga qui.
      */
     private const STACK_PACKS = [
