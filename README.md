@@ -33,7 +33,12 @@ controlli, blocca la pull request invece di lasciarla passare.
   ripetono le best practice del framework, codificano le regole di casa. Nella
   v1 esiste `symfony-twig-stimulus`, caricabile come skill
   `worky-stack-symfony-twig-stimulus`.
-- **`/worky:onboard`** è l'intervista che produce entrambi.
+- **`skills/worky-design/`** porta le regole di interfaccia valide su ogni
+  progetto: gli stati che mancano sempre, i form, l'accessibilità minima, cosa
+  provare prima di dire che una pagina è finita. Nessun colore e nessun
+  carattere: l'identità visiva di ogni progetto sta nella sezione `## Aspetto`
+  del suo `CLAUDE.md`.
+- **`/worky:onboard`** è l'intervista che produce tutto questo.
 
 ## Installazione
 
@@ -107,6 +112,7 @@ worky/
 │   ├── observe.php                  # i fatti osservati, in JSON
 │   └── write-config.php             # scrive .worky.json
 ├── skills/
+│   ├── worky-design/                # regole di interfaccia, ovunque
 │   └── worky-stack-symfony-twig-stimulus/
 ├── src/                             # Config, ProjectFacts
 └── tests/

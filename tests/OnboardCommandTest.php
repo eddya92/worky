@@ -39,6 +39,22 @@ final class OnboardCommandTest extends TestCase
         self::assertStringContainsString('## Convenzioni di progetto', $contents);
     }
 
+    public function testChiedeLAspettoDelProgettoELoRegistra(): void
+    {
+        $contents = $this->command();
+
+        self::assertStringContainsString(
+            '## Aspetto',
+            $contents,
+            'L\'identità visiva del progetto va scritta dove gli agenti la rileggono',
+        );
+        self::assertStringContainsString(
+            'worky-design',
+            $contents,
+            'Va nominata la skill che porta le regole di interfaccia valide ovunque',
+        );
+    }
+
     public function testDichiaraLoStatoDelComposerJsonOsservato(): void
     {
         self::assertStringContainsString('composer_json', $this->command());

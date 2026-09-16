@@ -70,6 +70,17 @@ parlare col database, dove sta la logica applicativa, come si nominano le
 cose, cosa è vietato. Poni la domanda una volta, in modo aperto, e accetta
 anche "niente di particolare" come risposta.
 
+Se il progetto ha un'interfaccia, fai **una seconda domanda** sul suo aspetto:
+colori, caratteri, componenti ricorrenti, tono delle scritte. Le regole
+generali di interfaccia le porta già la skill `worky-design`, valida su ogni
+progetto; qui serve solo ciò che distingue *questo*. Se esiste già un foglio di
+stile, delle variabili CSS o un design system, chiedi dove sono invece di farti
+elencare i valori a voce: li leggerai tu.
+
+Accetta anche qui "non c'è niente di deciso". In quel caso dillo esplicitamente
+nel riepilogo: senza un aspetto dichiarato ogni pagina nuova rischia di
+somigliare a sé stessa e a nient'altro.
+
 ### 5. Scrivi, solo dopo conferma
 
 Presenta il riepilogo completo e chiedi conferma con AskUserQuestion. **Non
@@ -117,6 +128,22 @@ creandolo se manca, con due cose:
 
    Senza questa riga il pacchetto resta un file che nessuno apre: `.worky.json`
    dichiara lo stack, ma niente lo carica da solo.
+
+Se il progetto ha un'interfaccia, scrivi anche una sezione `## Aspetto` nello
+stesso `CLAUDE.md`, con ciò che l'utente ha dichiarato: colori, caratteri,
+componenti ricorrenti, tono. Se ha indicato un foglio di stile o delle
+variabili invece di elencare i valori, cita il percorso del file: la fonte è
+quella, e resta aggiornata da sola.
+
+Chiudi la sezione con l'istruzione che vale su ogni progetto:
+
+> Per costruire o modificare interfaccia in questo progetto carica la skill
+> `worky-design`, e rispetta quanto scritto qui sopra dove le due cose si
+> sovrappongono.
+
+Se l'utente non ha dichiarato nulla sull'aspetto, scrivi lo stesso la sezione
+con una riga che dice che non è stato deciso niente: un vuoto dichiarato è una
+domanda aperta, un vuoto silenzioso è una dimenticanza.
 
 ### 6. Chiudi
 
