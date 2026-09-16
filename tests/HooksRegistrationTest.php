@@ -24,6 +24,39 @@ final class HooksRegistrationTest extends TestCase
         self::assertSame('Bash', $hooks['PreToolUse'][0]['matcher']);
     }
 
+    public function testRegistraIlDiarioSuOgniEventoCheServeAllaDashboard(): void
+    {
+        $hooks = $this->config()['hooks'];
+
+        foreach (['PreToolUse', 'PostToolUse', 'SubagentStop', 'Stop', 'SessionStart'] as $event) {
+            self::assertArrayHasKey($event, $hooks, "Il diario deve essere registrato su $event");
+
+            $comandi = [];
+
+            foreach ($hooks[$event] as $entry) {
+                foreach ($entry['hooks'] as $hook) {
+                    $comandi[] = $hook['command'];
+                }
+            }
+
+            self::assertNotEmpty(
+                array_filter($comandi, static fn (string $c): bool => str_contains($c, 'event-log.php')),
+                "Nessun diario registrato su $event",
+            );
+        }
+    }
+
+    public function testIlDiarioNonPuoBloccareIlLavoro(): void
+    {
+        $sorgente = (string) file_get_contents(__DIR__ . '/../hooks/event-log.php');
+
+        self::assertStringNotContainsString(
+            'exit(2)',
+            $sorgente,
+            'Il diario non deve mai uscire con il codice che blocca',
+        );
+    }
+
     public function testOgniScriptReferenziatoEsiste(): void
     {
         $hooks = $this->config()['hooks'];
@@ -41,6 +74,6 @@ final class HooksRegistrationTest extends TestCase
             }
         }
 
-        self::assertSame(2, $found);
+        self::assertSame(7, $found, 'Un hook in piu o in meno va aggiunto qui di proposito, non per caso');
     }
 }

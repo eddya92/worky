@@ -1,5 +1,5 @@
 {
-  "description": "Gate di qualita worky: lint dei file PHP scritti e verifica prima della pull request",
+  "description": "worky: lint dei file PHP scritti, verifica prima della pull request, e diario degli eventi per la dashboard",
   "hooks": {
     "PostToolUse": [
       {
@@ -9,6 +9,16 @@
             "type": "command",
             "command": "php \"${CLAUDE_PLUGIN_ROOT}/hooks/php-lint.php\"",
             "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"${CLAUDE_PLUGIN_ROOT}/hooks/event-log.php\"",
+            "timeout": 5
           }
         ]
       }
@@ -21,6 +31,49 @@
             "type": "command",
             "command": "php \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-pr-gate.php\"",
             "timeout": 900
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"${CLAUDE_PLUGIN_ROOT}/hooks/event-log.php\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"${CLAUDE_PLUGIN_ROOT}/hooks/event-log.php\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"${CLAUDE_PLUGIN_ROOT}/hooks/event-log.php\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"${CLAUDE_PLUGIN_ROOT}/hooks/event-log.php\"",
+            "timeout": 5
           }
         ]
       }
