@@ -47,6 +47,28 @@ claude plugin marketplace add https://github.com/eddy2r/worky
 claude plugin install worky
 ```
 
+## Come si aggiorna
+
+La copia installata vive in cache **sotto la versione**, quindi `claude plugin
+update` confronta i numeri di versione, non i file. Senza bump non propaga
+niente e la sessione continua a caricare i file vecchi, in silenzio.
+
+Dopo ogni modifica:
+
+1. Alza la versione in `.claude-plugin/plugin.json` **e** in
+   `.claude-plugin/marketplace.json`. Un test fallisce se le due divergono.
+2. `claude plugin marketplace update worky`
+3. `claude plugin update worky`
+4. **Riavvia Claude Code**: le sessioni aperte tengono la versione con cui sono
+   partite.
+
+Per controllare cosa è davvero installato: `claude plugin details worky` legge
+dalla sorgente, non dalla copia. Per vedere la copia vera:
+
+```bash
+ls ~/.claude/plugins/cache/worky/worky/
+```
+
 ## Primo uso su un progetto
 
 Apri il progetto in Claude Code ed esegui:

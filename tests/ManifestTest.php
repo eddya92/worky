@@ -41,4 +41,33 @@ final class ManifestTest extends TestCase
 
         self::assertDirectoryDoesNotExist(__DIR__ . '/../agents');
     }
+
+    /**
+     * La copia installata sta in cache sotto la versione: se i due manifesti
+     * non concordano, un aggiornamento non propaga i file nuovi e la sessione
+     * continua a caricare i vecchi, senza dire niente a nessuno.
+     */
+    public function testIDueManifestiDichiaranoLaStessaVersione(): void
+    {
+        $plugin = json_decode(
+            (string) file_get_contents(__DIR__ . '/../.claude-plugin/plugin.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        $marketplace = json_decode(
+            (string) file_get_contents(__DIR__ . '/../.claude-plugin/marketplace.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+
+        $dichiarate = array_column($marketplace['plugins'], 'version', 'name');
+
+        self::assertSame(
+            $plugin['version'],
+            $dichiarate[$plugin['name']] ?? null,
+            'plugin.json e marketplace.json devono dichiarare la stessa versione',
+        );
+    }
 }
