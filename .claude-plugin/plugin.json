@@ -1,7 +1,15 @@
 {
   "name": "worky",
   "description": "Esegue i comandi di qualita del progetto come hook e ricorda i comandi e le convenzioni di quel repo",
-  "version": "0.1.0",
-  "author": { "name": "eddy2r" },
-  "keywords": ["hooks", "quality-gate", "onboarding", "php", "symfony"]
+  "version": "0.2.0",
+  "author": {
+    "name": "eddy2r"
+  },
+  "keywords": [
+    "hooks",
+    "quality-gate",
+    "onboarding",
+    "php",
+    "symfony"
+  ]
 }
